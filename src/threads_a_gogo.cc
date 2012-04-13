@@ -105,6 +105,7 @@ cat ../../../src/thread_nextTick.js | ./minify kThread_nextTick_js > ../../../sr
 #include "events.js.c"
 //#include "load.js.c"
 #include "createPool.js.c"
+#include "ref.js.c"
 #include "thread_nextTick.js.c"
 //#include "JASON.js.c"
 
@@ -773,6 +774,7 @@ void Init (Handle<Object> target) {
   threadTemplate->Set(String::NewSymbol("load"), FunctionTemplate::New(Load));
   threadTemplate->Set(String::NewSymbol("emit"), FunctionTemplate::New(processEmit));
   threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));
+  threadTemplate->Set(String::NewSymbol("ref"), Script::Compile(String::New(kRef_js))->Run()->ToObject());
   
 }
 
