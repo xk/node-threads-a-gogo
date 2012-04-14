@@ -770,11 +770,11 @@ void Init (Handle<Object> target) {
   threadTemplate= Persistent<ObjectTemplate>::New(ObjectTemplate::New());
   threadTemplate->SetInternalFieldCount(1);
   threadTemplate->Set(id_symbol, Integer::New(0));
+  threadTemplate->Set(String::NewSymbol("ref"), Script::Compile(String::New(kRef_js))->Run()->ToObject());
   threadTemplate->Set(String::NewSymbol("eval"), FunctionTemplate::New(Eval));
   threadTemplate->Set(String::NewSymbol("load"), FunctionTemplate::New(Load));
   threadTemplate->Set(String::NewSymbol("emit"), FunctionTemplate::New(processEmit));
   threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));
-  threadTemplate->Set(String::NewSymbol("ref"), Script::Compile(String::New(kRef_js))->Run()->ToObject());
   
 }
 
@@ -785,5 +785,5 @@ void Init (Handle<Object> target) {
 NODE_MODULE(threads_a_gogo, Init)
 
 /*
-gcc -E -I /Users/jorge/JAVASCRIPT/binarios/include/node -o /o.c /Users/jorge/JAVASCRIPT/threads_a_gogo/src/threads_a_gogo.cc && mate /o.c
+gcc -E -I /Users/jorge/JAVASCRIPT/binarios/include/node -o /o.c /Users/jorge/JAVASCRIPT/node-threads-a-gogo/src/threads_a_gogo.cc && mate /o.c
 */
