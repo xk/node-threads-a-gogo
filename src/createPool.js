@@ -11,12 +11,14 @@
     throw '.createPool( numOfThreads ): numOfThreads must be a Number > 0';
   }
   
+  var ctr= 0;
   var kTypeRun= 1;
   var kTypeEmit= 2;
   var pool= [];
   var idleThreads= [];
   var q= { first:null, last:null, length:0 };
   var poolObject= {
+    ref: ref,
     any: { eval:evalAny, emit:emitAny },
     all: { eval:evalAll, emit:emitAll },
     on: on,
@@ -37,6 +39,66 @@
     throw e;
   }
 
+  function ref (ƒ) {
+    if (typeof ƒ !== 'function') {
+      throw TypeError('.ref( ƒ ) -> ƒ must be a function');
+    }
+    
+    var that= this;
+    var globalReference= 'thread._refs['+ ctr+ ']';
+    var refObject= {any:any, all:all, _ref:globalReference};
+    
+    if (ctr++) {
+      that.all.eval(globalReference+ '= '+ ƒ);
+    }
+    else {
+      that.all.eval('thread._refs= ['+ ƒ+ ']');
+    }
+    
+    function any () {
+      var n= arguments.length;
+      var params= '()';
+      var cb;
+    
+      if (n) {
+        (typeof arguments[n-1] === 'function') && (cb= arguments[--n]);
+    
+        if (n) {
+          params= [];
+          for (var i=0 ; i<n ; i++) {
+            params[i]= JSON.stringify(arguments[i]);
+          }
+          params= '('+ params.join(',')+ ')';
+        }
+      }
+    
+      cb ? that.any.eval(globalReference+ params, cb) : that.any.eval(globalReference+ params);
+      return refObject;
+    }
+    
+    function all () {
+      var n= arguments.length;
+      var params= '()';
+      var cb;
+
+      if (n) {
+        (typeof arguments[n-1] === 'function') && (cb= arguments[--n]);
+
+        if (n) {
+          params= [];
+          for (var i=0 ; i<n ; i++) {
+            params[i]= JSON.stringify(arguments[i]);
+          }
+          params= '('+ params.join(',')+ ')';
+        }
+      }
+
+      cb ? that.all.eval(globalReference+ params, cb) : that.all.eval(globalReference+ params);
+      return refObject;
+    }
+    
+    return refObject;
+  }
 
 
   function poolLoad (path, cb) {
