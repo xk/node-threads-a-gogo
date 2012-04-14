@@ -1,25 +1,20 @@
 (function (ctr) {
   
   return function ref (ƒ) {
-    
     if (typeof ƒ !== 'function') {
       throw TypeError('.ref( ƒ ) -> ƒ must be a function');
     }
-  
-    var globalReference= ƒ.name;
-    
-    if (globalReference) {
-      this.eval(ƒ);
-    }
-    else {
-      globalReference= 'thread._refs['+ ctr+ ']';
-      ctr++;
-      this.eval('!thread._refs && (thread._refs= []);\n'+ globalReference+ '= '+ ƒ);
-    }
     
     var that= this;
+    var globalReference= 'thread._refs['+ ctr+ ']';
+    if (ctr++) {
+      that.eval(globalReference+ '= '+ ƒ);
+    }
+    else {
+      that.eval('thread._refs= ['+ ƒ+ ']');
+    }
+    
     function fun () {
-      
       var n= arguments.length;
       var params= '()';
       var cb;
@@ -36,7 +31,8 @@
         }
       }
     
-      return cb ? that.eval(globalReference+ params, cb) : that.eval(globalReference+ params);
+      cb ? that.eval(globalReference+ params, cb) : that.eval(globalReference+ params);
+      return fun;
     }
     
     fun._ref= globalReference;

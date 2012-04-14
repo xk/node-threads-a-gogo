@@ -9,12 +9,12 @@ function cb (err, data) {
   if (err) throw err;
   if (+data !== r) throw Error('FAIL -> RESULT');
   console.log('PASS, OK -> RESULT: ['+ [data, r]+ '], NAME: '+ ref._ref);
-  thread.destroy();
+  this.destroy();
 }
 
 var ref= thread.ref(fibo);
 
-if (ref._ref !== fibo.name) throw Error('FAIL -> NAME');
+if (ref._ref !== 'thread._refs[0]') throw Error('FAIL -> NAME');
 
 ref(kN, cb);
 var r= fibo(kN);

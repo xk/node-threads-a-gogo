@@ -9,7 +9,7 @@ function cb (err, data) {
   if (err) throw err;
   if (+data !== r) throw Error('FAIL');
   console.log('PASS, OK -> RESULT: ['+ [data, r]+ '], NAME: '+ ref._ref);
-  thread.destroy();
+  this.destroy();
 }
 
 var ref= thread.ref(anonymous);
