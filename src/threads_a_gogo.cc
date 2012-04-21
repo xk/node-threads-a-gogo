@@ -16,6 +16,12 @@ static int debug_allocs= 0;
 */
 
 #include "queues_a_gogo.cc"
+#include "events.js.c"
+//#include "load.js.c"
+#include "createPool.js.c"
+#include "ref.js.c"
+#include "thread_nextTick.js.c"
+//#include "JASON.js.c"
 
 //using namespace node;
 using namespace v8;
@@ -26,6 +32,10 @@ static bool useLocker;
 
 static typeQueue* freeJobsQueue= NULL;
 static typeQueue* freeThreadsQueue= NULL;
+
+static ScriptData* compiledkEvents_js= ScriptData::PreCompile(String::New(kEvents_js));
+static ScriptData* compiledkCreatePool_js= ScriptData::PreCompile(String::New(kCreatePool_js));;
+static ScriptData* compiledkThread_nextTick_js= ScriptData::PreCompile(String::New(kThread_nextTick_js));;
 
 #define kThreadMagicCookie 0x99c0ffee
 typedef struct {
@@ -101,13 +111,6 @@ cat ../../../src/createPool.js | ./minify kCreatePool_js > ../../../src/kCreateP
 cat ../../../src/thread_nextTick.js | ./minify kThread_nextTick_js > ../../../src/kThread_nextTick_js
 
 */
-
-#include "events.js.c"
-//#include "load.js.c"
-#include "createPool.js.c"
-#include "ref.js.c"
-#include "thread_nextTick.js.c"
-//#include "JASON.js.c"
 
 //node-waf configure uninstall distclean configure build install
 
