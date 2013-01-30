@@ -1,8 +1,8 @@
 {
   "name": "threads_a_gogo",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "main": "build/release/threads_a_gogo.node",
-  "description": "██████ Simple and fast JavaScript threads for Node.js ██████",
+  "description": "████ Simple and fast JavaScript threads for Node.js ████",
   "keywords": [
     "The",
     "most",
@@ -21,7 +21,6 @@
     "url":    "http://github.com/xk/node-threads-a-gogo/issues",
     "email":  "jorge@jorgechamorro.com"
   },
-  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "http://github.com/xk/node-threads-a-gogo.git"
