@@ -727,13 +727,8 @@ static Handle<Value> Create (const Arguments &args) {
     pthread_mutex_init(&thread->IDLE_mutex, NULL);
     pthread_mutex_init(&thread->inQueue.queueLock, NULL);
     pthread_mutex_init(&thread->outQueue.queueLock, NULL);
-    pthread_attr_t attr;
-    pthread_attr_init(&attr);
-    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
-    int err= pthread_create(&thread->thread, &attr, aThread, thread);
-    pthread_attr_destroy(&attr);
-    if (err) {
-      //Ha habido un error no se ha arrancado esta thread
+    if (pthread_create(&thread->thread, NULL, aThread, thread)) {
+      //Ha habido un error no se ha arrancado este hilo
       destroyaThread(thread);
       return ThrowException(Exception::TypeError(String::New("create(): error in pthread_create()")));
     }
