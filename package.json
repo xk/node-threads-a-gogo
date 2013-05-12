@@ -26,7 +26,7 @@
     "url": "http://github.com/xk/node-threads-a-gogo.git"
   },
   "scripts": {
-    "install": "node-waf configure install"
+    "install": "node-gyp configure install"
   },
   "os": ["macos", "linux", "darwin"],
   "engines": {
