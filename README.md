@@ -1,4 +1,4 @@
-# Threads A GoGo for Node.js
+# TAGG: Threads à gogo for Node.js
 
 A native module for Node.js that provides an asynchronous, evented and/or continuation passing style API for moving blocking/longish CPU-bound tasks out of Node's event loop to JavaScript threads that run in parallel in the background and that use all the available CPU cores automatically; all from within a single Node process.
 
