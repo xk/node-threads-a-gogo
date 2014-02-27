@@ -12,7 +12,8 @@ From source:
 
     git clone http://github.com/xk/node-threads-a-gogo.git
     cd node-threads-a-gogo
-    node-waf configure install
+    node-gyp rebuild
+    # It also works with node-waf, but this is outdated, so please use node-gyp nowdays.
 
 To include the module in your project:
 
