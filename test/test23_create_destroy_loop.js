@@ -1,6 +1,6 @@
 
 
-var T= require('threads_a_gogo');
+var T= require('../lib');
 
 
 var i= 0;

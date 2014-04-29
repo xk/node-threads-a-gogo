@@ -1,6 +1,6 @@
 
 
-var Threads= require('threads_a_gogo');
+var Threads= require('../lib');
 
 function cb (err, msg) {
   i++;

@@ -1,14 +1,14 @@
 
 
-var Threads= require('threads_a_gogo');
+var Threads= require('../lib');
 
 function ƒ () {
   var i= 0;
   var t= Date.now();
-  
+
   (function ƒ () {
     thread.nextTick(ƒ);
-    
+
     if ((++i % 1e6) === 0) {
       var e= Date.now()- t;
       var cps= (i*1e3/e).toFixed(1);
