@@ -1,7 +1,9 @@
 //2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
 //queues_a_gogo.cc
 
+#ifdef HAVE_UNISTD_H
 #include <unistd.h>
+#endif
 #include <string.h>
 #include <stdio.h>
 #include <pthread.h>
@@ -40,7 +42,7 @@ static typeQueue* freeItemsQueue= NULL;
 
 static void queue_push (typeQueueItem* qitem, typeQueue* queue) {
   qitem->next= NULL;
-  
+
   pthread_mutex_lock(&queue->queueLock);
   if (queue->last) {
     queue->last->next= qitem;
@@ -58,7 +60,7 @@ static void queue_push (typeQueueItem* qitem, typeQueue* queue) {
 
 static typeQueueItem* queue_pull (typeQueue* queue) {
   typeQueueItem* qitem;
-  
+
   pthread_mutex_lock(&queue->queueLock);
   if ((qitem= queue->first)) {
     if (queue->last == qitem) {
@@ -71,7 +73,7 @@ static typeQueueItem* queue_pull (typeQueue* queue) {
     qitem->next= NULL;
   }
   pthread_mutex_unlock(&queue->queueLock);
-  
+
   return qitem;
 }
 
@@ -79,12 +81,12 @@ static typeQueueItem* queue_pull (typeQueue* queue) {
 
 
 static typeQueueItem* nuItem (int itemType, void* item) {
-  
+
   typeQueueItem* qitem= queue_pull(freeItemsQueue);
   if (!qitem) {
     qitem= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
   }
-  
+
   qitem->next= NULL;
   qitem->itemType= itemType;
   if (itemType == kItemTypeNumber) {
@@ -93,7 +95,7 @@ static typeQueueItem* nuItem (int itemType, void* item) {
   else if (itemType == kItemTypePointer) {
     qitem->asPtr= item;
   }
-  
+
   return qitem;
 }
 
@@ -101,7 +103,7 @@ static typeQueueItem* nuItem (int itemType, void* item) {
 
 
 static void destroyItem (typeQueueItem* qitem) {
-  
+
   if (freeItemsQueue) {
     queue_push(qitem, freeItemsQueue);
   }
@@ -114,7 +116,7 @@ static void destroyItem (typeQueueItem* qitem) {
 
 
 static typeQueue* nuQueue (long int id) {
-  
+
   typeQueue* queue= NULL;
   typeQueueItem* qitem= NULL;
   if (queuesPool && queuesPool->first) qitem= queue_pull(queuesPool);
@@ -126,7 +128,7 @@ static typeQueue* nuQueue (long int id) {
     queue= (typeQueue*) calloc(1, sizeof(typeQueue));
     pthread_mutex_init(&queue->queueLock, NULL);
   }
-  
+
   queue->id= id;
   queue->length= 0;
   queue->first= queue->last= NULL;

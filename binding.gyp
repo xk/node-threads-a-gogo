@@ -10,7 +10,14 @@
 				"src/events.js.c",
 				"src/load.js.c",
 				"src/thread_nextTick.js.c"
-			]
+			],
+      "conditions": [
+        ['OS=="win"', {
+          'dependencies': [
+            'deps/pthreads-win32/pthread.gyp:pthread'
+          ]
+        }]
+      ]
 		}#,{}
 	]
 }
