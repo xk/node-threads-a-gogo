@@ -1,7 +1,7 @@
 {
   "name": "threads_a_gogo",
   "version": "0.1.7",
-  "main": "build/release/threads_a_gogo.node",
+  "main": "lib/index",
   "description": "████ Simple and fast JavaScript threads for Node.js ████",
   "keywords": [
     "The",
@@ -28,7 +28,7 @@
   "scripts": {
     "install": "node-gyp rebuild"
   },
-  "os": ["macos", "linux", "darwin"],
+  "os": ["macos", "linux", "darwin", "windows"],
   "engines": {
     "node": ">=0.5.1"
   },
