@@ -1,4 +1,4 @@
-var t= require('threads_a_gogo');
+var t= require('../lib');
 
 function eventHandler (data) {
   ctr++;
@@ -7,7 +7,7 @@ function eventHandler (data) {
 
 function boot () {
   thread.on('b', eventHandler);
-  
+
   function eventHandler (data) {
     thread.emit('a', 0);
   }

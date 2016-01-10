@@ -8,7 +8,7 @@ console.log("big.length is "+ big.length);
 
 var i= 0;
 var s= Date.now();
-var o= require('threads_a_gogo')
+var o= require('../lib')
   .create()
   .eval(function boot () {
     thread.on('b', function (data) {

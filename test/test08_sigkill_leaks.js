@@ -1,6 +1,6 @@
 
 
-var Thread= require('threads_a_gogo');
+var Thread= require('../lib');
 
 function cb (e,m) {
   this.destroy();
