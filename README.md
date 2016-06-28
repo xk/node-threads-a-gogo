@@ -6,7 +6,7 @@ Threads à gogo ([*](http://en.wikipedia.org/wiki/%C3%80_gogo)) is a native modu
 
 With [npm](http://npmjs.org/):
 
-    npm install threads_a_gogo
+    npm install threads_a_gogo --save
 
 From source:
 
@@ -16,9 +16,9 @@ From source:
     # It also works with node-waf, but this is outdated, so please use node-gyp nowdays.
 
 To include the module in your project:
-
-    var threads_a_gogo= require('threads_a_gogo');
-
+``` javascript
+import threads_a_gogo from 'threads_a_gogo';
+```
 **You need a node with a v8 >= 3.2.4 to run this module. Any node >= 0.5.1 comes with a v8 >= 3.2.4.**
 
 The module **runs fine, though, in any node >= 0.2.0** as long as you build it with a v8 >= 3.2.4. To do that you simply have to replace /node/deps/v8 with a newer version of v8 and recompile it (node). To get any version of node goto http://nodejs.org/dist/, and for v8 goto http://github.com/v8/v8, click on "branch", select the proper tag (>= 3.2.4), and download the .zip.
