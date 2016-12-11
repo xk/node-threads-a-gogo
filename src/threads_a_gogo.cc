@@ -29,7 +29,8 @@ static typeQueue* freeJobsQueue= NULL;
 static typeQueue* freeThreadsQueue= NULL;
 
 #define kThreadMagicCookie 0x99c0ffee
-typedef struct {
+
+struct typeThread {
 #ifdef TAGG_USE_LIBUV
   uv_async_t async_watcher; //MUST be the first one
 #else
@@ -54,34 +55,38 @@ typedef struct {
   Persistent<Object> dispatchEvents;
   
   unsigned long threadMagicCookie;
-} typeThread;
+};
 
 enum jobTypes {
   kJobTypeEval,
   kJobTypeEvent
 };
 
-typedef struct {
+struct typeEvent {
+  int length;
+  String::Utf8Value* eventName;
+  String::Utf8Value** argumentos;
+};
+
+struct typeEval {
+  int error;
+  int tiene_callBack;
+  int useStringObject;
+  String::Utf8Value* resultado;
+  union {
+    char* scriptText_CharPtr;
+    String::Utf8Value* scriptText_StringObject;
+  };
+};
+     
+struct typeJob {
   int jobType;
   Persistent<Object> cb;
   union {
-    struct {
-      int length;
-      String::Utf8Value* eventName;
-      String::Utf8Value** argumentos;
-    } typeEvent;
-    struct {
-      int error;
-      int tiene_callBack;
-      int useStringObject;
-      String::Utf8Value* resultado;
-      union {
-        char* scriptText_CharPtr;
-        String::Utf8Value* scriptText_StringObject;
-      };
-    } typeEval;
+    typeEval eval;
+    typeEvent event;
   };
-} typeJob;
+};
 
 /*
 
@@ -268,23 +273,23 @@ static void eventLoop (typeThread* thread) {
           if (job->jobType == kJobTypeEval) {
             //Ejecutar un texto
             
-            if (job->typeEval.useStringObject) {
-              str= job->typeEval.scriptText_StringObject;
+            if (job->eval.useStringObject) {
+              str= job->eval.scriptText_StringObject;
               source= String::New(**str, (*str).length());
               delete str;
             }
             else {
-              source= String::New(job->typeEval.scriptText_CharPtr);
-              free(job->typeEval.scriptText_CharPtr);
+              source= String::New(job->eval.scriptText_CharPtr);
+              free(job->eval.scriptText_CharPtr);
             }
             
             script= Script::New(source);
             
             if (!onError.HasCaught()) resultado= script->Run();
 
-            if (job->typeEval.tiene_callBack) {
-              job->typeEval.error= onError.HasCaught() ? 1 : 0;
-              job->typeEval.resultado= new String::Utf8Value(job->typeEval.error ? onError.Exception() : resultado);
+            if (job->eval.tiene_callBack) {
+              job->eval.error= onError.HasCaught() ? 1 : 0;
+              job->eval.resultado= new String::Utf8Value(job->eval.error ? onError.Exception() : resultado);
               queue_push(qitem, &thread->outQueue);
               // wake up callback
 #ifdef TAGG_USE_LIBUV
@@ -303,22 +308,22 @@ static void eventLoop (typeThread* thread) {
             //Emitir evento.
             
             Local<Value> args[2];
-            str= job->typeEvent.eventName;
+            str= job->event.eventName;
             args[0]= String::New(**str, (*str).length());
             delete str;
             
-            Local<Array> array= Array::New(job->typeEvent.length);
+            Local<Array> array= Array::New(job->event.length);
             args[1]= array;
             
             int i= 0;
-            while (i < job->typeEvent.length) {
-              str= job->typeEvent.argumentos[i];
+            while (i < job->event.length) {
+              str= job->event.argumentos[i];
               array->Set(i, String::New(**str, (*str).length()));
               delete str;
               i++;
             }
             
-            free(job->typeEvent.argumentos);
+            free(job->event.argumentos);
             queue_push(qitem, freeJobsQueue);
             dispatchEvents->CallAsFunction(global, 2, args);
           }
@@ -422,10 +427,10 @@ static void Callback (
 
     if (job->jobType == kJobTypeEval) {
 
-      if (job->typeEval.tiene_callBack) {
-        str= job->typeEval.resultado;
+      if (job->eval.tiene_callBack) {
+        str= job->eval.resultado;
 
-        if (job->typeEval.error) {
+        if (job->eval.error) {
           argv[0]= Exception::Error(String::New(**str, (*str).length()));
           argv[1]= null;
         } else {
@@ -434,10 +439,10 @@ static void Callback (
         }
         job->cb->CallAsFunction(thread->JSObject, 2, argv);
         job->cb.Dispose();
-        job->typeEval.tiene_callBack= 0;
+        job->eval.tiene_callBack= 0;
 
         delete str;
-        job->typeEval.resultado= NULL;
+        job->eval.resultado= NULL;
       }
 
       queue_push(qitem, freeJobsQueue);
@@ -460,22 +465,22 @@ static void Callback (
       
       Local<Value> args[2];
       
-      str= job->typeEvent.eventName;
+      str= job->event.eventName;
       args[0]= String::New(**str, (*str).length());
       delete str;
       
-      Local<Array> array= Array::New(job->typeEvent.length);
+      Local<Array> array= Array::New(job->event.length);
       args[1]= array;
       
       int i= 0;
-      while (i < job->typeEvent.length) {
-        str= job->typeEvent.argumentos[i];
+      while (i < job->event.length) {
+        str= job->event.argumentos[i];
         array->Set(i, String::New(**str, (*str).length()));
         delete str;
         i++;
       }
       
-      free(job->typeEvent.argumentos);
+      free(job->event.argumentos);
       queue_push(qitem, freeJobsQueue);
       thread->dispatchEvents->CallAsFunction(thread->JSObject, 2, args);
     }
@@ -533,12 +538,12 @@ static Handle<Value> Eval (const Arguments &args) {
   typeQueueItem* qitem= nuJobQueueItem();
   typeJob* job= (typeJob*) qitem->asPtr;
   
-  job->typeEval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
-  if (job->typeEval.tiene_callBack) {
+  job->eval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
+  if (job->eval.tiene_callBack) {
     job->cb= Persistent<Object>::New(args[1]->ToObject());
   }
-  job->typeEval.scriptText_StringObject= new String::Utf8Value(args[0]);
-  job->typeEval.useStringObject= 1;
+  job->eval.scriptText_StringObject= new String::Utf8Value(args[0]);
+  job->eval.useStringObject= 1;
   job->jobType= kJobTypeEval;
   
   pushToInQueue(qitem, thread);
@@ -594,12 +599,12 @@ static Handle<Value> Load (const Arguments &args) {
   typeQueueItem* qitem= nuJobQueueItem();
   typeJob* job= (typeJob*) qitem->asPtr;
 
-  job->typeEval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
-  if (job->typeEval.tiene_callBack) {
+  job->eval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
+  if (job->eval.tiene_callBack) {
     job->cb= Persistent<Object>::New(args[1]->ToObject());
   }
-  job->typeEval.scriptText_CharPtr= source;
-  job->typeEval.useStringObject= 0;
+  job->eval.scriptText_CharPtr= source;
+  job->eval.useStringObject= 0;
   job->jobType= kJobTypeEval;
 
   pushToInQueue(qitem, thread);
@@ -628,14 +633,14 @@ static Handle<Value> processEmit (const Arguments &args) {
   typeJob* job= (typeJob*) qitem->asPtr;
   
   job->jobType= kJobTypeEvent;
-  job->typeEvent.length= args.Length()- 1;
-  job->typeEvent.eventName= new String::Utf8Value(args[0]);
-  job->typeEvent.argumentos= (v8::String::Utf8Value**) malloc(job->typeEvent.length* sizeof(void*));
+  job->event.length= args.Length()- 1;
+  job->event.eventName= new String::Utf8Value(args[0]);
+  job->event.argumentos= (v8::String::Utf8Value**) malloc(job->event.length* sizeof(void*));
   
   int i= 1;
   do {
-    job->typeEvent.argumentos[i-1]= new String::Utf8Value(args[i]);
-  } while (++i <= job->typeEvent.length);
+    job->event.argumentos[i-1]= new String::Utf8Value(args[i]);
+  } while (++i <= job->event.length);
   
   pushToInQueue(qitem, thread);
   
@@ -661,14 +666,14 @@ static Handle<Value> threadEmit (const Arguments &args) {
   typeJob* job= (typeJob*) qitem->asPtr;
   
   job->jobType= kJobTypeEvent;
-  job->typeEvent.length= args.Length()- 1;
-  job->typeEvent.eventName= new String::Utf8Value(args[0]);
-  job->typeEvent.argumentos= (v8::String::Utf8Value**) malloc(job->typeEvent.length* sizeof(void*));
+  job->event.length= args.Length()- 1;
+  job->event.eventName= new String::Utf8Value(args[0]);
+  job->event.argumentos= (v8::String::Utf8Value**) malloc(job->event.length* sizeof(void*));
   
   i= 1;
   do {
-    job->typeEvent.argumentos[i-1]= new String::Utf8Value(args[i]);
-  } while (++i <= job->typeEvent.length);
+    job->event.argumentos[i-1]= new String::Utf8Value(args[i]);
+  } while (++i <= job->event.length);
   
   queue_push(qitem, &thread->outQueue);
   
