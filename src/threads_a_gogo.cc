@@ -11,51 +11,14 @@
 #include <stdlib.h>
 #include <string>
 
+#define kThreadMagicCookie 0x99c0ffee
 #define TAGG_USE_LIBUV
 #if (NODE_MAJOR_VERSION == 0) && (NODE_MINOR_VERSION <= 5)
 #undef TAGG_USE_LIBUV
 #endif
 
-#include "queues_a_gogo.cc"
-
 //using namespace node;
 using namespace v8;
-
-static Persistent<String> id_symbol;
-static Persistent<ObjectTemplate> threadTemplate;
-static bool useLocker;
-
-static typeQueue* freeJobsQueue= NULL;
-static typeQueue* freeThreadsQueue= NULL;
-
-#define kThreadMagicCookie 0x99c0ffee
-
-struct typeThread {
-#ifdef TAGG_USE_LIBUV
-  uv_async_t async_watcher; //MUST be the first one
-#else
-  ev_async async_watcher; //MUST be the first one
-#endif
-  
-  long int id;
-  pthread_t thread;
-  volatile int sigkill;
-  
-  typeQueue inQueue;  //Jobs to run
-  typeQueue outQueue; //Jobs done
-  
-  volatile int IDLE;
-  pthread_cond_t IDLE_cv;
-  pthread_mutex_t IDLE_mutex;
-  
-  Isolate* isolate;
-  Persistent<Context> context;
-  Persistent<Object> JSObject;
-  Persistent<Object> threadJSObject;
-  Persistent<Object> dispatchEvents;
-  
-  unsigned long threadMagicCookie;
-};
 
 enum jobTypes {
   kJobTypeEval,
@@ -88,6 +51,55 @@ struct typeJob {
   };
 };
 
+struct typeQueueItem {
+  typeQueueItem* next;
+  typeJob job;
+};
+
+struct typeQueue {
+  typeQueueItem* last;
+  typeQueueItem* first;
+  volatile long int length;
+  pthread_mutex_t queueLock;
+};
+
+struct typeThread {
+
+#ifdef TAGG_USE_LIBUV
+  uv_async_t async_watcher; //MUST be the first one
+#else
+  ev_async async_watcher; //MUST be the first one
+#endif
+  
+  long int id;
+  pthread_t thread;
+  volatile int sigkill;
+  
+  typeQueue toThreadQueue;  //Jobs to run
+  typeQueue toProcessQueue; //Jobs done
+  
+  volatile int IDLE;
+  pthread_cond_t IDLE_cv;
+  pthread_mutex_t IDLE_mutex;
+  
+  Isolate* isolate;
+  Persistent<Context> context;
+  Persistent<Object> JSObject;
+  Persistent<Object> threadJSObject;
+  Persistent<Object> dispatchEvents;
+  
+  unsigned long threadMagicCookie;
+};
+
+#include "queues_a_gogo.cc"
+
+static bool useLocker;
+static long int threadsCtr= 0;
+static Persistent<String> id_symbol;
+static typeQueue* freeJobsQueue= NULL;
+static Persistent<ObjectTemplate> threadTemplate;
+
+
 /*
 
 cd deps/minifier/src
@@ -100,10 +112,8 @@ cat ../../../src/thread_nextTick.js | ./minify kThread_nextTick_js > ../../../sr
 */
 
 #include "events.js.c"
-//#include "load.js.c"
 #include "createPool.js.c"
 #include "thread_nextTick.js.c"
-//#include "JASON.js.c"
 
 //node-waf configure uninstall distclean configure build install
 
@@ -115,10 +125,8 @@ cat ../../../src/thread_nextTick.js | ./minify kThread_nextTick_js > ../../../sr
 
 
 static typeQueueItem* nuJobQueueItem (void) {
-  typeQueueItem* qitem= queue_pull(freeJobsQueue);
-  if (!qitem) {
-    qitem= nuItem(kItemTypePointer, calloc(1, sizeof(typeJob)));
-  }
+  typeQueueItem* qitem= qPull(freeJobsQueue);
+  if (!qitem) qitem= nuQitem();
   return qitem;
 }
 
@@ -129,7 +137,6 @@ static typeQueueItem* nuJobQueueItem (void) {
 
 static typeThread* isAThread (Handle<Object> receiver) {
   typeThread* thread;
-  
   if (receiver->IsObject()) {
     if (receiver->InternalFieldCount() == 1) {
       thread= (typeThread*) receiver->GetPointerFromInternalField(0);
@@ -138,7 +145,6 @@ static typeThread* isAThread (Handle<Object> receiver) {
       }
     }
   }
-  
   return NULL;
 }
 
@@ -149,7 +155,7 @@ static typeThread* isAThread (Handle<Object> receiver) {
 
 static void pushToInQueue (typeQueueItem* qitem, typeThread* thread) {
   pthread_mutex_lock(&thread->IDLE_mutex);
-  queue_push(qitem, &thread->inQueue);
+  qPush(qitem, &thread->toThreadQueue);
   if (thread->IDLE) {
     pthread_cond_signal(&thread->IDLE_cv);
   }
@@ -162,8 +168,6 @@ static void pushToInQueue (typeQueueItem* qitem, typeThread* thread) {
 
 
 static Handle<Value> Puts (const Arguments &args) {
-  //fprintf(stdout, "*** Puts BEGIN\n");
-  
   HandleScope scope;
   int i= 0;
   while (i < args.Length()) {
@@ -172,8 +176,6 @@ static Handle<Value> Puts (const Arguments &args) {
     i++;
   }
   fflush(stdout);
-
-  //fprintf(stdout, "*** Puts END\n");
   return Undefined();
 }
 
@@ -183,8 +185,8 @@ static Handle<Value> Puts (const Arguments &args) {
 
 static void eventLoop (typeThread* thread);
 
-// A background thread
-static void* aThread (void* arg) {
+//Esto es lo primero que ejecuta una thread al nacer.
+static void* threadBootProc (void* arg) {
   
   int dummy;
   pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &dummy);
@@ -261,9 +263,9 @@ static void eventLoop (typeThread* thread) {
         Local<Value> resultado;
         
         
-        while ((qitem= queue_pull(&thread->inQueue))) {
+        while ((qitem= qPull(&thread->toThreadQueue))) {
           
-          job= (typeJob*) qitem->asPtr;
+          job= &qitem->job;
           
           if ((++ctr) > 2e3) {
             ctr= 0;
@@ -290,16 +292,18 @@ static void eventLoop (typeThread* thread) {
             if (job->eval.tiene_callBack) {
               job->eval.error= onError.HasCaught() ? 1 : 0;
               job->eval.resultado= new String::Utf8Value(job->eval.error ? onError.Exception() : resultado);
-              queue_push(qitem, &thread->outQueue);
-              // wake up callback
+              qPush(qitem, &thread->toProcessQueue);
+
+// wake up callback
 #ifdef TAGG_USE_LIBUV
               uv_async_send(&thread->async_watcher);
 #else
               ev_async_send(EV_DEFAULT_UC_ &thread->async_watcher);
 #endif
+
             }
             else {
-              queue_push(qitem, freeJobsQueue);
+              qPush(qitem, freeJobsQueue);
             }
 
             if (onError.HasCaught()) onError.Reset();
@@ -324,7 +328,7 @@ static void eventLoop (typeThread* thread) {
             }
             
             free(job->event.argumentos);
-            queue_push(qitem, freeJobsQueue);
+            qPush(qitem, freeJobsQueue);
             dispatchEvents->CallAsFunction(global, 2, args);
           }
         }
@@ -347,11 +351,11 @@ static void eventLoop (typeThread* thread) {
         }
       }
       
-      if (nextTickQueueLength || thread->inQueue.length) continue;
+      if (nextTickQueueLength || thread->toThreadQueue.length) continue;
       if (thread->sigkill) break;
       
       pthread_mutex_lock(&thread->IDLE_mutex);
-      if (!thread->inQueue.length) {
+      if (!thread->toThreadQueue.length) {
         thread->IDLE= 1;
         pthread_cond_wait(&thread->IDLE_cv, &thread->IDLE_mutex);
         thread->IDLE= 0;
@@ -372,8 +376,8 @@ static void destroyaThread (typeThread* thread) {
   
   thread->sigkill= 0;
   //TODO: hay que vaciar las colas y destruir los trabajos antes de ponerlas a NULL
-  thread->inQueue.first= thread->inQueue.last= NULL;
-  thread->outQueue.first= thread->outQueue.last= NULL;
+  thread->toThreadQueue.first= thread->toThreadQueue.last= NULL;
+  thread->toProcessQueue.first= thread->toProcessQueue.last= NULL;
   thread->JSObject->SetPointerInInternalField(0, NULL);
   thread->JSObject.Dispose();
   
@@ -385,12 +389,7 @@ static void destroyaThread (typeThread* thread) {
   ev_unref(EV_DEFAULT_UC);
 #endif
   
-  if (freeThreadsQueue) {
-    queue_push(nuItem(kItemTypePointer, thread), freeThreadsQueue);
-  }
-  else {
-    free(thread);
-  }
+  free(thread);
 }
 
 
@@ -422,8 +421,8 @@ static void Callback (
   String::Utf8Value* str;
   
   TryCatch onError;
-  while ((qitem= queue_pull(&thread->outQueue))) {
-    job= (typeJob*) qitem->asPtr;
+  while ((qitem= qPull(&thread->toProcessQueue))) {
+    job= &qitem->job;
 
     if (job->jobType == kJobTypeEval) {
 
@@ -445,10 +444,11 @@ static void Callback (
         job->eval.resultado= NULL;
       }
 
-      queue_push(qitem, freeJobsQueue);
+      qPush(qitem, freeJobsQueue);
       
       if (onError.HasCaught()) {
-        if (thread->outQueue.first) {
+        if (thread->toProcessQueue.first) {
+        
 #ifdef TAGG_USE_LIBUV
           uv_async_send(&thread->async_watcher); // wake up callback again
 #else
@@ -481,7 +481,7 @@ static void Callback (
       }
       
       free(job->event.argumentos);
-      queue_push(qitem, freeJobsQueue);
+      qPush(qitem, freeJobsQueue);
       thread->dispatchEvents->CallAsFunction(thread->JSObject, 2, args);
     }
   }
@@ -522,7 +522,7 @@ static Handle<Value> Destroy (const Arguments &args) {
 
 
 
-// Eval: Pushes a job into the thread's ->inQueue.
+// Eval: Pushes a job into the thread's ->toThreadQueue.
 static Handle<Value> Eval (const Arguments &args) {
   HandleScope scope;
   
@@ -536,7 +536,7 @@ static Handle<Value> Eval (const Arguments &args) {
   }
 
   typeQueueItem* qitem= nuJobQueueItem();
-  typeJob* job= (typeJob*) qitem->asPtr;
+  typeJob* job= &qitem->job;
   
   job->eval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
   if (job->eval.tiene_callBack) {
@@ -597,7 +597,7 @@ static Handle<Value> Load (const Arguments &args) {
   if (!source) return scope.Close(args.This()); //@Bruno: even if source is empty, we should call the callback ?
 
   typeQueueItem* qitem= nuJobQueueItem();
-  typeJob* job= (typeJob*) qitem->asPtr;
+  typeJob* job= &qitem->job;
 
   job->eval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
   if (job->eval.tiene_callBack) {
@@ -620,8 +620,6 @@ static Handle<Value> Load (const Arguments &args) {
 static Handle<Value> processEmit (const Arguments &args) {
   HandleScope scope;
   
-  //fprintf(stdout, "*** processEmit\n");
-  
   if (!args.Length()) return scope.Close(args.This());
   
   typeThread* thread= isAThread(args.This());
@@ -630,7 +628,7 @@ static Handle<Value> processEmit (const Arguments &args) {
   }
   
   typeQueueItem* qitem= nuJobQueueItem();
-  typeJob* job= (typeJob*) qitem->asPtr;
+  typeJob* job= &qitem->job;
   
   job->jobType= kJobTypeEvent;
   job->event.length= args.Length()- 1;
@@ -655,35 +653,29 @@ static Handle<Value> processEmit (const Arguments &args) {
 static Handle<Value> threadEmit (const Arguments &args) {
   HandleScope scope;
   
-  //fprintf(stdout, "*** threadEmit\n");
-  
   if (!args.Length()) return scope.Close(args.This());
   
-  int i;
   typeThread* thread= (typeThread*) Isolate::GetCurrent()->GetData();
-  
   typeQueueItem* qitem= nuJobQueueItem();
-  typeJob* job= (typeJob*) qitem->asPtr;
+  typeJob* job= &qitem->job;
   
   job->jobType= kJobTypeEvent;
   job->event.length= args.Length()- 1;
   job->event.eventName= new String::Utf8Value(args[0]);
   job->event.argumentos= (v8::String::Utf8Value**) malloc(job->event.length* sizeof(void*));
   
-  i= 1;
+  int i= 1;
   do {
     job->event.argumentos[i-1]= new String::Utf8Value(args[i]);
   } while (++i <= job->event.length);
   
-  queue_push(qitem, &thread->outQueue);
+  qPush(qitem, &thread->toProcessQueue);
   
 #ifdef TAGG_USE_LIBUV
   uv_async_send(&thread->async_watcher); // wake up callback
 #else
   ev_async_send(EV_DEFAULT_UC_ &thread->async_watcher); // wake up callback
 #endif
-  
-  //fprintf(stdout, "*** threadEmit END\n");
   
   return scope.Close(args.This());
 }
@@ -699,24 +691,12 @@ static Handle<Value> threadEmit (const Arguments &args) {
 static Handle<Value> Create (const Arguments &args) {
     HandleScope scope;
     
-    typeThread* thread;
-    typeQueueItem* qitem= NULL;
-    qitem= queue_pull(freeThreadsQueue);
-    if (qitem) {
-      thread= (typeThread*) qitem->asPtr;
-      destroyItem(qitem);
-    }
-    else {
-      thread= (typeThread*) calloc(1, sizeof(typeThread));
-      thread->threadMagicCookie= kThreadMagicCookie;
-    }
-    
-    static long int threadsCtr= 0;
+    typeThread* thread= (typeThread*) calloc(1, sizeof (typeThread));
     thread->id= threadsCtr++;
-    
+    thread->threadMagicCookie= kThreadMagicCookie;
     thread->JSObject= Persistent<Object>::New(threadTemplate->NewInstance());
-    thread->JSObject->Set(id_symbol, Integer::New(thread->id));
     thread->JSObject->SetPointerInInternalField(0, thread);
+    thread->JSObject->Set(id_symbol, Integer::New(thread->id));
     Local<Value> dispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(thread->JSObject, 0, NULL);
     thread->dispatchEvents= Persistent<Object>::New(dispatchEvents->ToObject());
     
@@ -728,40 +708,43 @@ static Handle<Value> Create (const Arguments &args) {
     ev_ref(EV_DEFAULT_UC);
 #endif
     
-    pthread_cond_init(&thread->IDLE_cv, NULL);
-    pthread_mutex_init(&thread->IDLE_mutex, NULL);
-    pthread_mutex_init(&thread->inQueue.queueLock, NULL);
-    pthread_mutex_init(&thread->outQueue.queueLock, NULL);
-    if (pthread_create(&thread->thread, NULL, aThread, thread)) {
-      //Ha habido un error no se ha arrancado este hilo
-      destroyaThread(thread);
+    pthread_cond_init(&(thread->IDLE_cv), NULL);
+    pthread_mutex_init(&(thread->IDLE_mutex), NULL);
+    pthread_mutex_init(&(thread->toThreadQueue.queueLock), NULL);
+    pthread_mutex_init(&(thread->toProcessQueue.queueLock), NULL);
+    if (pthread_create(&(thread->thread), NULL, threadBootProc, thread)) {
+      pthread_cond_destroy(&(thread->IDLE_cv));
+      pthread_mutex_destroy(&(thread->IDLE_mutex));
+      pthread_mutex_destroy(&(thread->toThreadQueue.queueLock));
+      pthread_mutex_destroy(&(thread->toProcessQueue.queueLock));
+      
+#ifdef TAGG_USE_LIBUV
+      uv_close((uv_handle_t*) &thread->async_watcher, NULL);
+      //uv_unref(&thread->async_watcher);
+#else
+      ev_async_stop(EV_DEFAULT_UC_ &thread->async_watcher);
+      ev_unref(EV_DEFAULT_UC);
+#endif
+
+      thread->JSObject.Dispose();
+      free(thread);
       return ThrowException(Exception::TypeError(String::New("create(): error in pthread_create()")));
     }
-    
-    /*
-    V8::AdjustAmountOfExternalAllocatedMemory(sizeof(typeThread));  //OJO V8 con V mayúscula.
-    */
-    
+
     return scope.Close(thread->JSObject);
 }
 
 
 void Init (Handle<Object> target) {
   
-  initQueues();
-  freeThreadsQueue= nuQueue(-3);
-  freeJobsQueue= nuQueue(-4);
-  
+  freeJobsQueue= nuQueue();
   HandleScope scope;
-  
   useLocker= v8::Locker::IsActive();
+  id_symbol= Persistent<String>::New(String::NewSymbol("id"));
   
   target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
   target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kCreatePool_js))->Run()->ToObject());
-  //target->Set(String::NewSymbol("JASON"), Script::Compile(String::New(kJASON_js))->Run()->ToObject());
   
-  id_symbol= Persistent<String>::New(String::NewSymbol("id"));
-
   threadTemplate= Persistent<ObjectTemplate>::New(ObjectTemplate::New());
   threadTemplate->SetInternalFieldCount(1);
   threadTemplate->Set(id_symbol, Integer::New(0));
@@ -769,7 +752,11 @@ void Init (Handle<Object> target) {
   threadTemplate->Set(String::NewSymbol("load"), FunctionTemplate::New(Load));
   threadTemplate->Set(String::NewSymbol("emit"), FunctionTemplate::New(processEmit));
   threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));
+  
 }
+
+
+
 
 
 
