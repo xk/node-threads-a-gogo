@@ -6,38 +6,31 @@
   
   thread= this;
 
-  function on (e, f, q) {
-    (q= thread._on[e]) ? q.push(f) : (thread._on[e]= [f]);
+  function on (event,f,q) {
+    (q= thread._on[event]) ? q.push(f) : (thread._on[event]= [f]);
     return thread;
   }
 
-  function once (e, f, q) {
-    !(q= thread._on[e]) && (q= thread._on[e]= []);
+  function once (event,f,q) {
+    (q= thread._on[event]) ? 0 : (q= thread._on[event]= []);
     q.once ? q.once.push(f) : (q.once= [f]);
     return thread;
   }
   
-  function removeAllListeners (e) {
-    arguments.length ? delete thread._on[e] : (thread._on= {});
+  function removeAllListeners (event) {
+    event ? delete thread._on[event] : (thread._on= {});
     return thread;
   }
   
-  function dispatchEvents (event, args, q, i, len) {
-    if (q= thread._on[event]) {
-      i= 0;
-      len= q.length;
-      while (i < len) {
-        q[i++].apply(thread, args);
+  function dispatchEvents (event,args,q) {
+    q= thread._on[event];
+    if (q) {
+      if (q.once) {
+        q.once.forEach(function (v,i,o) { v.apply(thread,args) });
+        delete q.once;
       }
-      
-      if (q= q.once) {
-        q.once= undefined;
-        i= 0;
-        len= q.length;
-        while (i < len) {
-          q[i++].apply(thread, args);
-        }
-      }
+      q.forEach(function (v,i,o) { v.apply(thread,args) });
+      q= q.once;
     }
   }
   
