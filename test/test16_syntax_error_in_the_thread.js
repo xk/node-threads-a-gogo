@@ -3,7 +3,7 @@
 var Thread= require('threads_a_gogo');
 
 function cb (e,m) {
-  process.stdout.write('[ '+ e+ ', '+ m+ ', '+ (i++)+ ' ]\n');
+  process.stdout.write('[ '+ e+ ', '+ m+ ', '+ (i++)+ ' ]\r');
   this.eval(syntaxError, cb);
 }
 
