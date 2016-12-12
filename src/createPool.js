@@ -1,10 +1,10 @@
-(function createPool (n) {
+(function createPool (n,tagg) {
   'use strict';
   
   //2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
   //threads_a_gogo_createPool.js
   
-  var T= this;
+  tagg= this;
   
   n= Math.floor(n);
   if (!(n > 0)) {
@@ -20,16 +20,16 @@
     any: { eval:evalAny, emit:emitAny },
     all: { eval:evalAll, emit:emitAll },
     on: on,
-    totalThreads: function getNumThreads () { return pool.length },
+    totalThreads: function getTotalThreads () { return pool.length },
     idleThreads: function getIdleThreads () { return idleThreads.length },
     pendingJobs: function getPendingJobs () { return q.length },
-    destroy:destroy,
-    load:poolLoad
+    destroy: destroy,
+    load: poolLoad
   };
   
   try {
     while (n--) {
-      pool[n]= idleThreads[n]= T.create();
+      pool[n]= idleThreads[n]= tagg.create();
     }
   }
   catch (e) {
@@ -40,10 +40,8 @@
 
 
   function poolLoad (path, cb) {
-    var i= pool.length;
-    while (i--) {
-      pool[i].load(path, cb);
-    }
+    pool.forEach(function (v,i,o) { v.load(path,cb) });
+    return poolObject;
   }
 
 
@@ -102,55 +100,56 @@
 
 
 
-  function evalAny (src, cb) {
-    qPush(src, cb, kTypeRun);
-    if (idleThreads.length) {
-      nextJob(idleThreads.pop());
-    }
+  function cbWrap (thread,cb) {
     
+    return function wrappedCb () {
+      
+    };
+  }
+
+
+
+  function evalAny (src, cb) {
+    if (idleThreads.length)
+      idleThreads.pop().eval(src,cbWrap(cb));
+    else
+      jobsQueueAny.push({type:kTypeRun, src:src, cb:cb});
     return poolObject;
   }
 
 
 
   function evalAll (src, cb) {
-    pool.forEach(function (v,i,o) {
-      v.eval(src, cb);
-    });
-    
+    pool.forEach(function (v,i,o) { v.eval(src,cb) });
     return poolObject;
   }
 
 
 
-  function emitAny (event, data) {
-    qPush(event, data, kTypeEmit);
-    if (idleThreads.length) {
-      nextJob(idleThreads.pop());
-    }
-    
+  function emitAny (t,args) {
+    args= Array.prototype.splice.call(arguments,0);
+    if (idleThreads.length)
+      (t= idleThreads.pop()).emit.apply(t,args);
+    else
+      jobsQueueAny.push({type:kTypeEmit, args:args});
     return poolObject;
   }
 
 
 
-  function emitAll (event, data) {
-    pool.forEach(function (v,i,o) {
-      v.emit(event, data);
-    });
-    
+  function emitAll (args) {
+    args= Array.prototype.splice.call(arguments,0);
+    pool.forEach(function (v,i,o) { v.emit.apply(v,args) });
     return poolObject;
   }
 
 
 
   function on (event, cb) {
-    pool.forEach(function (v,i,o) {
-      v.on(event, cb);
-    });
-    
-    return this;
+    pool.forEach(function (v,i,o) { v.on(event,cb) });
+    return poolObject;
   }
+
 
 
   function destroy (rudely) {
