@@ -68,7 +68,7 @@ typedef struct typeQueueItem {
 typedef struct typeQueue {
   typeQueueItem* last;
   typeQueueItem* first;
-  pthread_mutex_t queueLock;
+  pthread_mutex_t mutex;
 } typeQueue;
 
 typedef struct typeThread {
@@ -174,7 +174,7 @@ static void pushJobToThread (typeQueueItem* qitem, typeThread* thread) {
   
   //Cogiendo este lock sabemos que la thread o no ha salido aún
   //del event loop o está parada en wait/sleep/idle
-  pthread_mutex_lock(&thread->processToThreadQueue.queueLock);
+  pthread_mutex_lock(&thread->processToThreadQueue.mutex);
   
   DEBUG && printf("PUSH JOB TO THREAD #2\n");
   //Estamos seguros de que no se está tocando thread->IDLE
@@ -186,7 +186,7 @@ static void pushJobToThread (typeQueueItem* qitem, typeThread* thread) {
   }
   DEBUG && printf("PUSH JOB TO THREAD #4\n");
   //Hay que volver a soltar el lock
-  pthread_mutex_unlock(&thread->processToThreadQueue.queueLock);
+  pthread_mutex_unlock(&thread->processToThreadQueue.mutex);
   DEBUG && printf("PUSH JOB TO THREAD #5\n");
   DEBUG && printf("PUSH JOB TO THREAD #6\n");
 }
@@ -408,7 +408,7 @@ static void eventLoop (typeThread* thread) {
       //que nadie la está tocando
       //y por otro lado para poder tocar thread->IDLE sabiendo
       //que nadie la está mirando mientras la tocamos.
-      pthread_mutex_lock(&thread->processToThreadQueue.queueLock);
+      pthread_mutex_lock(&thread->processToThreadQueue.mutex);
       DEBUG && printf("THREAD %ld TIENE processToThreadQueue_MUTEX\n", thread->id);
       //aquí tenemos acceso exclusivo a processToThreadQueue y a thread->IDLE
       while (!thread->processToThreadQueue.first && !thread->sigkill) {
@@ -421,7 +421,7 @@ static void eventLoop (typeThread* thread) {
         //nos despierten y haya cosas en la queue o haya sigkill
         //El lock se abre al entrar en pthread_cond_wait así que los
         //demás ahora van a poder mirar thread->IDLE mientras estamos parados/durmiendo
-        pthread_cond_wait(&thread->IDLE_cv, &thread->processToThreadQueue.queueLock);
+        pthread_cond_wait(&thread->IDLE_cv, &thread->processToThreadQueue.mutex);
         //El lock queda cerrado al salir de pthread_cond_wait pero no importa xq
         //si seguimos en el bucle se va a volver a abrir y si salimos tb
       }
@@ -429,7 +429,7 @@ static void eventLoop (typeThread* thread) {
       thread->IDLE= 0;
       DEBUG && printf("THREAD %ld WAKE UP\n", thread->id);
       //lo soltamos
-      pthread_mutex_unlock(&thread->processToThreadQueue.queueLock);
+      pthread_mutex_unlock(&thread->processToThreadQueue.mutex);
       DEBUG && printf("THREAD %ld SUELTA processToThreadQueue_mutex\n", thread->id);
       
     }
@@ -598,7 +598,7 @@ static Handle<Value> Destroy (const Arguments &args) {
 
   DEBUG && printf("KILLING [%d] THREAD %ld #1\n", arg, thread->id);
   //pthread_cancel(thread->thread);
-  pthread_mutex_lock(&thread->processToThreadQueue.queueLock);
+  pthread_mutex_lock(&thread->processToThreadQueue.mutex);
   DEBUG && printf("KILLING [%d] THREAD %ld #2\n", arg, thread->id);
   thread->sigkillNicely= !arg;
   thread->sigkill= arg;
@@ -607,7 +607,7 @@ static Handle<Value> Destroy (const Arguments &args) {
     pthread_cond_signal(&thread->IDLE_cv);
   }
   DEBUG && printf("KILLING [%d] THREAD %ld #4\n", arg, thread->id);
-  pthread_mutex_unlock(&thread->processToThreadQueue.queueLock);
+  pthread_mutex_unlock(&thread->processToThreadQueue.mutex);
   DEBUG && printf("KILLING [%d] THREAD %ld #5\n", arg, thread->id);
 
   return Undefined();
@@ -797,13 +797,13 @@ static Handle<Value> Create (const Arguments &args) {
 #endif
     
     pthread_cond_init(&(thread->IDLE_cv), NULL);
-    pthread_mutex_init(&(thread->processToThreadQueue.queueLock), NULL);
-    pthread_mutex_init(&(thread->threadToProcessQueue.queueLock), NULL);
+    pthread_mutex_init(&(thread->processToThreadQueue.mutex), NULL);
+    pthread_mutex_init(&(thread->threadToProcessQueue.mutex), NULL);
     if (pthread_create(&(thread->thread), NULL, threadBootProc, thread)) {
       //Algo ha ido mal, toca deshacer todo
       pthread_cond_destroy(&(thread->IDLE_cv));
-      pthread_mutex_destroy(&(thread->processToThreadQueue.queueLock));
-      pthread_mutex_destroy(&(thread->threadToProcessQueue.queueLock));
+      pthread_mutex_destroy(&(thread->processToThreadQueue.mutex));
+      pthread_mutex_destroy(&(thread->threadToProcessQueue.mutex));
       
 #ifdef TAGG_USE_LIBUV
       uv_close((uv_handle_t*) &thread->async_watcher, NULL);
