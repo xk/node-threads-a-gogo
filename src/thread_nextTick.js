@@ -1,34 +1,32 @@
-(function () {
+(function (thread) {
   'use strict';
   
   //2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
   //threads_a_gogo_thread_nextTicks.js
+  
+  thread= this;
   
   function nextTick (cb) {
     thread._ntq.push(cb);
     return this;
   }
 
-  function dispatchNextTicks (l, p, err, _ntq) {
-    if (l= (_ntq= thread._ntq).length) {
-      p= err= 0;
-
+  function dispatchNextTicks (len,i) {
+    if (len= thread._ntq.length) {
+      i= 0;
       try {
-        do {
-          _ntq[p]();
-        } while (++p < l);
+        do { thread._ntq[i++]() } while (i<len);
+        thread._ntq= thread._ntq.splice(i);
       }
       catch (e) {
-        thread._ntq= _ntq.slice(++p);
+        thread._ntq= thread._ntq.splice(i);
         throw e;
       }
-
-      return (thread._ntq= _ntq.slice(p)).length;
     }
-    return 0;
+    return thread._ntq.length;
   }
 
   thread._ntq= [];
   thread.nextTick= nextTick;
   return dispatchNextTicks;
-})()
+})
