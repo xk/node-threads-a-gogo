@@ -11,7 +11,6 @@ static void qPush (typeQueueItem* qitem, typeQueue* queue) {
   else {
     queue->first= qitem;
   }
-  queue->length+= 1;
   queue->last= qitem;
   pthread_mutex_unlock(&queue->queueLock);
 }
@@ -28,7 +27,6 @@ static typeQueueItem* qPull (typeQueue* queue) {
         queue->first= queue->last= NULL;
       else
         queue->first= qitem->next;
-      queue->length-= 1;
       qitem->next= NULL;
     }
     pthread_mutex_unlock(&queue->queueLock);
