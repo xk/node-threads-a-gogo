@@ -1,5 +1,5 @@
 tagg= require('threads_a_gogo');
-howmany= +process.argv[2] || 10;
+howmany= +process.argv[2] || 4;
 process.stdout.write('Using '+ howmany+ ' threads\n');
 flipflop= 0;
 while (howmany--) {
