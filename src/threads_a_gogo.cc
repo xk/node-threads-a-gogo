@@ -29,18 +29,18 @@ static int DEBUG= 0;
 //using namespace node;
 using namespace v8;
 
-enum jobTypes {
+typedef enum jobTypes {
   kJobTypeEval,
   kJobTypeEvent
-};
+} jobTypes;
 
-struct typeEvent {
+typedef struct typeEvent {
   int length;
   String::Utf8Value* eventName;
   String::Utf8Value** argumentos;
-};
+} typeEvent;
 
-struct typeEval {
+typedef struct typeEval {
   int error;
   int tiene_callBack;
   int useStringObject;
@@ -49,29 +49,29 @@ struct typeEval {
     char* scriptText_CharPtr;
     String::Utf8Value* scriptText_StringObject;
   };
-};
+} typeEval;
      
-struct typeJob {
+typedef struct typeJob {
   int jobType;
   Persistent<Object> cb;
   union {
     typeEval eval;
     typeEvent event;
   };
-};
+} typeJob;
 
-struct typeQueueItem {
+typedef struct typeQueueItem {
   typeQueueItem* next;
   typeJob job;
-};
+} typeQueueItem;
 
-struct typeQueue {
+typedef struct typeQueue {
   typeQueueItem* last;
   typeQueueItem* first;
   pthread_mutex_t queueLock;
-};
+} typeQueue;
 
-struct typeThread {
+typedef struct typeThread {
 
 #ifdef TAGG_USE_LIBUV
   uv_async_t async_watcher; //MUST be the first one
@@ -98,7 +98,7 @@ struct typeThread {
   Persistent<Object> dispatchEvents;
   
   unsigned long threadMagicCookie;
-};
+} typeThread;
 
 #include "queues_a_gogo.cc"
 
@@ -116,13 +116,13 @@ gcc minify.c -o minify
 cat ../../../src/events.js | ./minify kEvents_js > ../../../src/kEvents_js
 cat ../../../src/load.js | ./minify kLoad_js > ../../../src/kLoad_js
 cat ../../../src/createPool.js | ./minify kCreatePool_js > ../../../src/kCreatePool_js
-cat ../../../src/thread_nextTick.js | ./minify kThread_nextTick_js > ../../../src/kThread_nextTick_js
+cat ../../../src/nextTick.js | ./minify kNextTick_js > ../../../src/kNextTick_js
 
 */
 
 #include "events.js.c"
 #include "createPool.js.c"
-#include "thread_nextTick.js.c"
+#include "nextTick.js.c"
 
 //node-waf configure uninstall distclean configure build install
 
@@ -283,9 +283,10 @@ static void eventLoop (typeThread* thread) {
     threadObject->Set(String::NewSymbol("id"), Number::New(thread->id));
     threadObject->Set(String::NewSymbol("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
     Local<Object> dispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
-    Local<Object> dispatchNextTicks= Script::Compile(String::New(kThread_nextTick_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
+    Local<Object> dispatchNextTicks= Script::Compile(String::New(kNextTick_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
     Local<Array> _ntq= (v8::Array*) *threadObject->Get(String::NewSymbol("_ntq"));
     long int ctr= 0;
+    long int kGC= 1000;
     
     //SetFatalErrorHandler(FatalErrorCB);
     
@@ -310,6 +311,11 @@ static void eventLoop (typeThread* thread) {
           
           if (thread->sigkill) break;
           
+          if ((++ctr) > kGC) {
+            ctr= 0;		
+            V8::IdleNotification();		
+          }
+          
           if (ntql) {
             DEBUG && printf("THREAD %ld NTQL\n", thread->id);
             dispatchNextTicks->CallAsFunction(threadObject, 0, NULL);
@@ -320,7 +326,12 @@ static void eventLoop (typeThread* thread) {
             DEBUG && printf("THREAD %ld NO NTQL\n", thread->id);
         
           if (thread->sigkill) break;
-        
+          
+          if ((++ctr) > kGC) {
+            ctr= 0;		
+            V8::IdleNotification();		
+          }
+          
           if (qitem) {
             DEBUG && printf("THREAD %ld QITEM\n", thread->id);
             job= &qitem->job;
@@ -388,8 +399,9 @@ static void eventLoop (typeThread* thread) {
       //entonces activar sigkill aquí sería hacerlo nicely not rudely
       if (thread->sigkillNicely) thread->sigkill= 1;
       if (thread->sigkill) break;
-      
+
       V8::IdleNotification();
+      
       DEBUG && printf("THREAD %ld BEFORE MUTEX\n", thread->id);
       //cogemos el lock para
       //por un lado poder mirar si hay cosas en la queue sabiendo
