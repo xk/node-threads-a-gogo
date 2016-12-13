@@ -1,67 +1,59 @@
 
+var tagg= require('threads_a_gogo');
 
-var Threads= require('threads_a_gogo');
-
-function cb (err, msg) {
-  i++;
-  threads[this.id]++;
-  this.eval(source, cb);
-  //process.stdout.write('['+ this.id+ ']');
-}
-
-
-function ƒ () { }
-var source= "ƒ()";
-
-var i= +process.argv[2] || 1;
-console.log('Using '+ i+ ' threads');
+var i= +process.argv[2] || 3;
+process.stdout.write('Using '+ i+ ' threads ');
 
 var threads= [];
 while (i--) {
   threads[i]= 0;
-  Threads.create().eval(ƒ)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb)
-  .eval(source, cb);
+  tagg.create().eval(function ƒ () { })
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb)
+  .eval('ƒ()', cb);
   process.stdout.write('.');
 }
+process.stdout.write('\n');
 
-i= 0;
-var t= Date.now();
-function display () {
-  var e= Date.now()- t;
-  var tps= (i*1e3/e).toFixed(1);
-  process.stdout.write('\nt (ms) -> '+ e+ ', i -> '+ i+ ', tps -> '+ tps+ ', [ '+ threads.map(percent)+ ' ]');
-  function percent (v) {
-    return Math.round(v/i*100);
-  }
+function cb (err, msg) {
+  ctr++;
+  threads[this.id]++;
+  this.eval('ƒ()', cb);
+  //process.stdout.write('['+ this.id+ ']');
 }
 
+var ctr= 0;
+var t= Date.now();
+
+function map (x) { return ( (ctr<10) || (x<10) ) ? '-' : (x/ctr*100).toFixed(1) }
+
+(function display (e,tps) {
+  setTimeout(display, 66);
+  e= Date.now()- t, tps= (1e3*ctr/e).toFixed(1);
+  process.stdout.write('#CB\'s CALLED:'+ ctr+ ', THREADS/SECOND:'+ tps+ ', [ '+ threads.map(map)+ ' ]\r');
+})();
 
 
-setInterval(display, 1e3);
+process.on('SIGINT', function () {
+  console.log('\nBYE !');
+  process.exit(0);
+});
+
+
+
 
 function pi () {
   var π= 0;

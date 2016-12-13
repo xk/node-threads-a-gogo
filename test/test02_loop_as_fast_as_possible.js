@@ -1,32 +1,30 @@
 
 
-var Threads= require('threads_a_gogo');
-
-function cb (err, msg) {
-  i++;
-  this.eval(source, cb);
-  //process.stdout.write('['+ this.id+ ']');
-}
-
-
-function ƒ () { }
-var source= "ƒ()";
+var tagg= require('threads_a_gogo');
 
 var i= +process.argv[2] || 1;
-console.log('Using '+ i+ ' threads');
-
+process.stdout.write('Using '+ i+ ' threads ');
 
 while (i--) {
-  Threads.create().eval(ƒ).eval(source, cb);
+  tagg.create().eval(function ƒ () { }).eval('ƒ()', cb);
   process.stdout.write('.');
 }
+process.stdout.write('\n');
 
-i= 0;
-var t= Date.now();
-function display () {
-  var e= Date.now()- t;
-  var tps= (i*1e3/e).toFixed(1);
-  console.log('t (ms) -> '+ e+ ', i -> '+ i+ ', tps -> '+ tps);
+function cb (err, msg) {
+  ctr+= 1;
+  this.eval('ƒ()', cb);
 }
 
-setInterval(display, 1e3);
+var ctr= 0;
+var t= Date.now();
+(function display (e,tps) {
+  setTimeout(display, 333);
+  e= Date.now()- t, tps= (1e3*ctr/e).toFixed(1);
+  process.stdout.write('#CALLBACKS CALLED: '+ ctr+ ', THREADS PER SECOND: '+ tps+ '\r');
+})();
+
+process.on('SIGINT', function () {
+  console.log('\nBYE !');
+  process.exit(0);
+});
