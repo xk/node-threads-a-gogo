@@ -13,7 +13,7 @@ function f (i,ctr,max) {
       ctr+= 1;
       puts(ctr+ ', _ntq.length: '+ thread._ntq.length+ '     \r');
       //perhaps add a few more nextTick(g)s
-      n= i>37 ? 37 : i;
+      n= i>20 ? 20 : i;
       while (n--) i--, thread.nextTick(g);
     }
     else {
