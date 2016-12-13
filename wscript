@@ -33,7 +33,7 @@ def minify(ctxt):
   print ""
   subprocess.check_call(["sh", "-c", cmd("load.js","kLoad_js")])
   print ""
-  subprocess.check_call(["sh", "-c", cmd("thread_nextTick.js","kThread_nextTick_js")])
+  subprocess.check_call(["sh", "-c", cmd("nextTick.js","kNextTick_js")])
   print ""
 
 def configure(conf):
