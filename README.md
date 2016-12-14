@@ -250,7 +250,7 @@ var thread= threads_a_gogo.create();
 ##### .emit( eventType, eventData [, eventData ... ] )
 `thread.emit( eventType, eventData [, eventData ... ] )` -> emit an event of `eventType` with `eventData` inside the thread `thread`. All its arguments are .toString()ed.
 ##### .destroy( /* no arguments */ )
-`thread.destroy( /* no arguments */ )` -> destroys the thread.
+`thread.destroy( [0 (nicely) | 1 (rudely)] [, cb])` -> destroys the thread. If the first parameter is 0 ('nicely', the default) the thread will keep running until both its nextTick queue and its pending jobs queue are empty. If it's 1 (rudely) the thread's event loop will exit as soon as possible, regardless. If a callback cb (optional) is provided, it will be called when the thread has been killed and completely destroyed, the cb will receive no arguments and with 'this' pointing to the global object.
 
 ***
 ### Thread pool API

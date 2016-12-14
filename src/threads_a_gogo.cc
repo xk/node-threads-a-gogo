@@ -98,8 +98,9 @@ typedef struct typeThread {
   Isolate* isolate;
   Persistent<Context> context;
   Persistent<Object> JSObject;
-  Persistent<Object> threadJSObject;
   Persistent<Object> dispatchEvents;
+  int hasDestroyCallback;
+  Persistent<Object> destroyCallback;
   
   unsigned long threadMagicCookie;
 } typeThread;
@@ -119,7 +120,7 @@ static void Callback (
 #else
   EV_P_ ev_async *watcher
 #endif
-                           , int revents);
+                           , int status);
 static Handle<Value> Destroy (const Arguments &args);
 static Handle<Value> Eval (const Arguments &args);
 static char* readFile (Handle<String> path);
@@ -466,8 +467,12 @@ static void eventLoop (typeThread* thread) {
 
 
 static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
+  HandleScope scope;
   typeThread* thread= (typeThread*) arg;
   DEBUG && printf("THREAD %ld cleanUpAfterThreadCallback()\n", thread->id);
+  if (thread->hasDestroyCallback) {
+    thread->destroyCallback->CallAsFunction(v8::Context::GetCurrent()->Global(), 0, NULL);
+  } 
   free(thread);
 }
 
@@ -633,6 +638,12 @@ static Handle<Value> Destroy (const Arguments &args) {
   if (args.Length()) {
     arg= args[0]->ToNumber()->Value() ? kKillRudely : kKillNicely;
   }
+  
+  thread->hasDestroyCallback= (args.Length() > 1) && (args[1]->IsFunction());
+  if (thread->hasDestroyCallback) {
+    thread->destroyCallback= Persistent<Object>::New(args[1]->ToObject());
+  }
+  
   const char* str= arg == kKillNicely ? "NICELY" : "RUDELY";
   DEBUG && printf("THREAD %ld DESTROY(%s) #1\n", thread->id, str);
   pthread_mutex_lock(&thread->processToThreadQueue.mutex);
@@ -835,9 +846,8 @@ static Handle<Value> Create (const Arguments &args) {
       if (!err) break;
       errstr= strerror(err);
       printf("THREAD %ld PTHREAD_CREATE() ERROR %d : %s RETRYING %d\n", thread->id, err, errstr, retry);
-      retry--;
       usleep(50000);
-    } while (retry>0);
+    } while (--retry);
     
     if (err) {
       //Algo ha ido mal, toca deshacer todo
