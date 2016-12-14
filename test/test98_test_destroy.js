@@ -1,7 +1,7 @@
 tagg= require('threads_a_gogo');
 howmany= +process.argv[2] || 4;
 process.stdout.write('Using '+ howmany+ ' threads\n');
-flipflop= 0;
+flipflop= 1;
 while (howmany--) {
   flipflop= flipflop ? 0 : 1;
   t= tagg.create();

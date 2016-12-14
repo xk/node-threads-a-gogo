@@ -71,6 +71,11 @@ typedef struct typeQueue {
   pthread_mutex_t mutex;
 } typeQueue;
 
+typedef enum killTypes {
+  kKillNicely= 1,
+  kKillRudely
+} killTypes;
+
 typedef struct typeThread {
 
 #ifdef TAGG_USE_LIBUV
@@ -83,7 +88,6 @@ typedef struct typeThread {
   pthread_t thread;
   volatile int ended;
   volatile int sigkill;
-  volatile int sigkillNicely;
   
   typeQueue processToThreadQueue;  //Jobs to run in the thread
   typeQueue threadToProcessQueue;  //Jobs to run in node's main thread
@@ -102,11 +106,37 @@ typedef struct typeThread {
 
 #include "queues_a_gogo.cc"
 
+static typeQueueItem* nuJobQueueItem (void);
+static typeThread* isAThread (Handle<Object> receiver);
+static void pushJobToThread (typeQueueItem* qitem, typeThread* thread);
+static Handle<Value> Puts (const Arguments &args);
+static void* threadBootProc (void* arg);
+static void eventLoop (typeThread* thread);
+static void cleanUpAfterThread (typeThread* thread);
+static void Callback (
+#ifdef TAGG_USE_LIBUV
+  uv_async_t *watcher
+#else
+  EV_P_ ev_async *watcher
+#endif
+                           , int revents);
+static Handle<Value> Destroy (const Arguments &args);
+static Handle<Value> Eval (const Arguments &args);
+static char* readFile (Handle<String> path);
+static Handle<Value> Load (const Arguments &args);
+static Handle<Value> processEmit (const Arguments &args);
+static Handle<Value> threadEmit (const Arguments &args);
+static Handle<Value> Create (const Arguments &args);
+void Init (Handle<Object> target);
+
+
 static bool useLocker;
 static long int threadsCtr= 0;
 static Persistent<String> id_symbol;
 static typeQueue* freeJobsQueue= NULL;
 static Persistent<ObjectTemplate> threadTemplate;
+
+
 
 
 /*
@@ -166,7 +196,7 @@ static void pushJobToThread (typeQueueItem* qitem, typeThread* thread) {
 
 //Esto se ejecuta siempre en node's main thread
 
-  DEBUG && printf("PUSH JOB TO THREAD #1\n");
+  DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #1\n", thread->id);
   //Esto garantiza que haya algo en la queue porque si no
   //la thread podría echarse a dormir (tb podría ya estar durmiendo)
   //si ve que no hay nada en la queue
@@ -176,19 +206,17 @@ static void pushJobToThread (typeQueueItem* qitem, typeThread* thread) {
   //del event loop o está parada en wait/sleep/idle
   pthread_mutex_lock(&thread->processToThreadQueue.mutex);
   
-  DEBUG && printf("PUSH JOB TO THREAD #2\n");
+  DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #2\n", thread->id);
   //Estamos seguros de que no se está tocando thread->IDLE
   //xq tenemos el lock nosotros y sólo se toca con el lock puesto
   if (thread->IDLE) {
     //estaba parada, hay que ponerla en marcha
-    DEBUG && printf("PUSH JOB TO THREAD #3\n");
+    DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #3\n", thread->id);
     pthread_cond_signal(&thread->IDLE_cv);
   }
-  DEBUG && printf("PUSH JOB TO THREAD #4\n");
   //Hay que volver a soltar el lock
   pthread_mutex_unlock(&thread->processToThreadQueue.mutex);
-  DEBUG && printf("PUSH JOB TO THREAD #5\n");
-  DEBUG && printf("PUSH JOB TO THREAD #6\n");
+  DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #5 EXIT\n", thread->id);
 }
 
 
@@ -197,9 +225,9 @@ static void pushJobToThread (typeQueueItem* qitem, typeThread* thread) {
 
 
 static Handle<Value> Puts (const Arguments &args) {
-  HandleScope scope;
   int i= 0;
   while (i < args.Length()) {
+    HandleScope scope;
     String::Utf8Value c_str(args[i]);
     fputs(*c_str, stdout);
     i++;
@@ -212,7 +240,6 @@ static Handle<Value> Puts (const Arguments &args) {
 
 
 
-static void eventLoop (typeThread* thread);
 
 
 
@@ -230,6 +257,9 @@ static void* threadBootProc (void* arg) {
   pthread_setcanceltype(PTHREAD_CANCEL_ASYNCHRONOUS, &dummy);
   
   typeThread* thread= (typeThread*) arg;
+  
+  DEBUG && printf("THREAD %ld BOOT ENTER\n", thread->id);
+  
   thread->isolate= Isolate::New();
   thread->isolate->SetData(thread);
   
@@ -249,16 +279,16 @@ static void* threadBootProc (void* arg) {
   thread->isolate->Dispose();
   DEBUG && printf("THREAD %ld BOOT EXIT #3\n", thread->id);
   thread->ended= 1;
+  DEBUG && printf("THREAD %ld BOOT EXIT #4 WAKEUP_EVENT_LOOP\n", thread->id);
   WAKEUP_EVENT_LOOP
-  DEBUG && printf("THREAD %ld BOOT EXIT #4\n", thread->id);
-  return NULL;
+  DEBUG && printf("THREAD %ld BOOT EXIT #5 ENDED\n", thread->id);
+  return 0;
 }
 
 
 
 
 
-static Handle<Value> threadEmit (const Arguments &args);
 
 
 
@@ -269,13 +299,15 @@ static void eventLoop (typeThread* thread) {
 
 // The thread's eventloop runs in the thread(s) not in node's main thread
 
+  DEBUG && printf("THREAD %ld EVENTLOOP ENTER\n", thread->id);
+
   thread->isolate->Enter();
   thread->context= Context::New();
   thread->context->Enter();
   
   {
     HandleScope scope1;
-    
+    Persistent<String> _ntq= Persistent<String>::New(String::NewSymbol("_ntq"));
     Local<Object> global= thread->context->Global();
     global->Set(String::NewSymbol("puts"), FunctionTemplate::New(Puts)->GetFunction());
     Local<Object> threadObject= Object::New();
@@ -284,15 +316,11 @@ static void eventLoop (typeThread* thread) {
     threadObject->Set(String::NewSymbol("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
     Local<Object> dispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
     Local<Object> dispatchNextTicks= Script::Compile(String::New(kNextTick_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
-    Local<Array> _ntq= (v8::Array*) *threadObject->Get(String::NewSymbol("_ntq"));
-    long int ctr= 0;
-    long int kGC= 1000;
     
     //SetFatalErrorHandler(FatalErrorCB);
     
-    while (!thread->sigkill) {
+    while (1) {
       typeJob* job;
-      double ntql= 0;
       typeQueueItem* qitem;
       
       {
@@ -302,42 +330,25 @@ static void eventLoop (typeThread* thread) {
         Local<String> source;
         Local<Script> script;
         Local<Value> resultado;
+        double ntql;
         
         DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
         
-        while ((qitem= qPull(&thread->processToThreadQueue)) || (ntql= _ntq->Length())) {
+        while (1) {
           
           DEBUG && printf("THREAD %ld WHILE\n", thread->id);
           
-          if (thread->sigkill) break;
+          if (thread->sigkill == kKillRudely) break;
           
-          if ((++ctr) > kGC) {
-            ctr= 0;		
-            V8::IdleNotification();		
-          }
-          
-          if (ntql) {
-            DEBUG && printf("THREAD %ld NTQL\n", thread->id);
-            dispatchNextTicks->CallAsFunction(threadObject, 0, NULL);
-            _ntq= (v8::Array*) *threadObject->Get(String::NewSymbol("_ntq"));
-            if (onError.HasCaught()) onError.Reset();
-          }
-          else
-            DEBUG && printf("THREAD %ld NO NTQL\n", thread->id);
-        
-          if (thread->sigkill) break;
-          
-          if ((++ctr) > kGC) {
-            ctr= 0;		
-            V8::IdleNotification();		
-          }
-          
-          if (qitem) {
+          if (thread->processToThreadQueue.first) {
+            qitem= qPull(&thread->processToThreadQueue);
+            HandleScope scope;
             DEBUG && printf("THREAD %ld QITEM\n", thread->id);
             job= &qitem->job;
             if (job->jobType == kJobTypeEval) {
               //Ejecutar un texto
-            
+              HandleScope scope;
+              
               if (job->eval.useStringObject) {
                 str= job->eval.scriptText_StringObject;
                 source= String::New(**str, (*str).length());
@@ -365,6 +376,7 @@ static void eventLoop (typeThread* thread) {
               if (onError.HasCaught()) onError.Reset();
             }
             else if (job->jobType == kJobTypeEvent) {
+              HandleScope scope;
               //Emitir evento.
             
               Local<Value> args[2];
@@ -390,14 +402,25 @@ static void eventLoop (typeThread* thread) {
           }
           else
             DEBUG && printf("THREAD %ld NO QITEM\n", thread->id);
+
+          if (thread->sigkill == kKillRudely) break;
+          
+          {
+            HandleScope scope;
+            DEBUG && printf("THREAD %ld NTQL\n", thread->id);
+            ntql= dispatchNextTicks->CallAsFunction(threadObject, 0, NULL)->ToNumber()->Value();
+            if (onError.HasCaught()) onError.Reset();
+          }
+          
+          if (!ntql && !thread->processToThreadQueue.first) {
+            DEBUG && printf("THREAD %ld EXIT WHILE: NO NTQL AND NO QITEM\n", thread->id);
+            break;
+          }
           
         }
         
       }
       
-      //Si nos han pedido amablemente que acabemos y no había nada que hacer...
-      //entonces activar sigkill aquí sería hacerlo nicely not rudely
-      if (thread->sigkillNicely) thread->sigkill= 1;
       if (thread->sigkill) break;
 
       V8::IdleNotification();
@@ -411,7 +434,7 @@ static void eventLoop (typeThread* thread) {
       pthread_mutex_lock(&thread->processToThreadQueue.mutex);
       DEBUG && printf("THREAD %ld TIENE processToThreadQueue_MUTEX\n", thread->id);
       //aquí tenemos acceso exclusivo a processToThreadQueue y a thread->IDLE
-      while (!thread->processToThreadQueue.first && !thread->sigkill) {
+      while (!thread->sigkill && !thread->processToThreadQueue.first) {
         //sólo se entra aquí si no hay nada en la queue y no hay sigkill
         //hemos avisado con thread->IDLE de que nos quedamos parados
         // para que sepan que nos han de despertar
@@ -442,32 +465,47 @@ static void eventLoop (typeThread* thread) {
 
 
 
-
+static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
+  typeThread* thread= (typeThread*) arg;
+  DEBUG && printf("THREAD %ld cleanUpAfterThreadCallback()\n", thread->id);
+  free(thread);
+}
 
 
 static void cleanUpAfterThread (typeThread* thread) {
   
-  DEBUG && printf("DESTROYATHREAD %ld IN MAIN THREAD #1\n", thread->id);
+  DEBUG && printf("THREAD %ld cleanUpAfterThread() IN MAIN THREAD #1\n", thread->id);
   
-  //TODO: hay que vaciar las colas y destruir los trabajos antes de ponerlas a NULL
-  thread->processToThreadQueue.first= thread->processToThreadQueue.last= NULL;
-  thread->threadToProcessQueue.first= thread->threadToProcessQueue.last= NULL;
-  thread->JSObject->SetPointerInInternalField(0, NULL);
+  //(*TO_DO*): hay que vaciar las colas y destruir los trabajos y sus objetos antes de ponerlas a NULL
+  
+  pthread_cond_destroy(&(thread->IDLE_cv));
+  pthread_mutex_destroy(&(thread->processToThreadQueue.mutex));
+  pthread_mutex_destroy(&(thread->threadToProcessQueue.mutex));
+  thread->dispatchEvents.Dispose();
   thread->JSObject.Dispose();
   
-  DEBUG && printf("DESTROYATHREAD %ld IN MAIN THREAD #2\n", thread->id);
-  
+  if (thread->ended) {
+    // Esta thread llegó a funcionar alguna vez
+    // hay que apagar uv antes de poder hacer free(thread)
+    // De hecho el free(thread) se hará en una Callabck xq uv_close la va a llamar
+    
+    DEBUG && printf("THREAD %ld cleanUpAfterThread() FREE IN UV CALLBACK #2\n", thread->id);
+    
 #ifdef TAGG_USE_LIBUV
-  uv_close((uv_handle_t*) &thread->async_watcher, NULL);
-  //uv_unref(&thread->async_watcher);
+    uv_close((uv_handle_t*) &thread->async_watcher, cleanUpAfterThreadCallback);
+    //uv_unref(&thread->async_watcher);
 #else
-  ev_async_stop(EV_DEFAULT_UC_ &thread->async_watcher);
-  ev_unref(EV_DEFAULT_UC);
+    ev_async_stop(EV_DEFAULT_UC_ &thread->async_watcher);
+    ev_unref(EV_DEFAULT_UC);
 #endif
-  
-  DEBUG && printf("DESTROYATHREAD %ld IN MAIN THREAD #FINAL\n", thread->id);
-  
-  //free(thread);
+
+  }
+  else {
+    //Esta thread nunca ha llegado a arrancar
+    //Seguramente venimos de un error en thread.create())
+    DEBUG && printf("THREAD %ld cleanUpAfterThread() FREE HERE #3\n", thread->id);
+    free(thread);
+  }
 }
 
 
@@ -484,10 +522,12 @@ static void Callback (
 #else
   EV_P_ ev_async *watcher
 #endif
-                           , int revents) {
+                           , int status) {
   typeThread* thread= (typeThread*) watcher;
   
   if (thread->ended) {
+    DEBUG && printf("THREAD %ld CALLBACK CALLED cleanUpAfterThread()\n", thread->id);
+    //pthread_cancel(thread->thread);
     cleanUpAfterThread(thread);
     return;
   }
@@ -572,43 +612,38 @@ static void Callback (
 // Tell a thread to quit, either nicely or rudely.
 static Handle<Value> Destroy (const Arguments &args) {
 
-  //thread.destroy() or thread.destroy(0) means nicely (the deafult)
+  //thread.destroy() or thread.destroy(0) means nicely (the default)
   //thread destroy(1) means rudely.
-  //When done nicely the thread will quit only if/when there aren't any jobs pending
+  //When done nicely the thread will quit only if/when there aren't anymore jobs pending
   //in its jobsQueue nor nextTick()ed functions to execute in the nextTick queue _ntq[]
   //When done rudely it will try to exit the event loop regardless.
-  //If the thread is stuck in a ` while (1) ; ` or something this won't work...
+  //If the thread is stuck in a ` while (1) ; ` or something this won't work... (*TO_DO*)
   
   HandleScope scope;
   //TODO: Hay que comprobar que this en un objeto y que tiene hiddenRefTotypeThread_symbol y que no es nil
   //TODO: Aquí habría que usar static void TerminateExecution(int thread_id);
   //TODO: static void v8::V8::TerminateExecution  ( Isolate *   isolate= NULL   )   [static]
   
-  int arg= 0;
   typeThread* thread= isAThread(args.This());
   if (!thread) {
     return ThrowException(Exception::TypeError(String::New("thread.destroy(): the receiver must be a thread object")));
   }
   
+  int arg= kKillNicely;
   if (args.Length()) {
-    arg= args[0]->ToNumber()->NumberValue();
+    arg= args[0]->ToNumber()->Value() ? kKillRudely : kKillNicely;
   }
-
-  DEBUG && printf("DESTROY(%d) THREAD %ld \n", arg, thread->id);
-
-  DEBUG && printf("KILLING [%d] THREAD %ld #1\n", arg, thread->id);
-  //pthread_cancel(thread->thread);
+  const char* str= arg == kKillNicely ? "NICELY" : "RUDELY";
+  DEBUG && printf("THREAD %ld DESTROY(%s) #1\n", thread->id, str);
   pthread_mutex_lock(&thread->processToThreadQueue.mutex);
-  DEBUG && printf("KILLING [%d] THREAD %ld #2\n", arg, thread->id);
-  thread->sigkillNicely= !arg;
+  DEBUG && printf("THREAD %ld DESTROY(%s) #2\n", thread->id, str);
   thread->sigkill= arg;
   if (thread->IDLE) {
-    DEBUG && printf("KILLING [%d] THREAD %ld #3\n", arg, thread->id);
+    DEBUG && printf("THREAD %ld DESTROY(%s) #3\n", thread->id, str);
     pthread_cond_signal(&thread->IDLE_cv);
   }
-  DEBUG && printf("KILLING [%d] THREAD %ld #4\n", arg, thread->id);
   pthread_mutex_unlock(&thread->processToThreadQueue.mutex);
-  DEBUG && printf("KILLING [%d] THREAD %ld #5\n", arg, thread->id);
+  DEBUG && printf("THREAD %ld DESTROY(%s) #4 EXIT\n", thread->id, str);
 
   return Undefined();
 }
@@ -788,34 +823,39 @@ static Handle<Value> Create (const Arguments &args) {
     Local<Value> dispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(thread->JSObject, 0, NULL);
     thread->dispatchEvents= Persistent<Object>::New(dispatchEvents->ToObject());
     
-#ifdef TAGG_USE_LIBUV
-    uv_async_init(uv_default_loop(), &thread->async_watcher, Callback);
-#else
-    ev_async_init(&thread->async_watcher, Callback);
-    ev_async_start(EV_DEFAULT_UC_ &thread->async_watcher);
-    ev_ref(EV_DEFAULT_UC);
-#endif
-    
     pthread_cond_init(&(thread->IDLE_cv), NULL);
     pthread_mutex_init(&(thread->processToThreadQueue.mutex), NULL);
     pthread_mutex_init(&(thread->threadToProcessQueue.mutex), NULL);
-    if (pthread_create(&(thread->thread), NULL, threadBootProc, thread)) {
+    
+    char* errstr;
+    int err, retry= 5;
+    do {
+      err= pthread_create(&(thread->thread), NULL, threadBootProc, thread);
+      //pthread_detach(pthread_t thread); ???
+      if (!err) break;
+      errstr= strerror(err);
+      printf("THREAD %ld PTHREAD_CREATE() ERROR %d : %s RETRYING %d\n", thread->id, err, errstr, retry);
+      retry--;
+      usleep(50000);
+    } while (retry>0);
+    
+    if (err) {
       //Algo ha ido mal, toca deshacer todo
-      pthread_cond_destroy(&(thread->IDLE_cv));
-      pthread_mutex_destroy(&(thread->processToThreadQueue.mutex));
-      pthread_mutex_destroy(&(thread->threadToProcessQueue.mutex));
-      
-#ifdef TAGG_USE_LIBUV
-      uv_close((uv_handle_t*) &thread->async_watcher, NULL);
-      //uv_unref(&thread->async_watcher);
-#else
-      ev_async_stop(EV_DEFAULT_UC_ &thread->async_watcher);
-      ev_unref(EV_DEFAULT_UC);
-#endif
-
-      thread->JSObject.Dispose();
-      free(thread);
+      printf("THREAD %ld PTHREAD_CREATE() ERROR %d : %s NOT RETRYING ANY MORE\n", thread->id, err, errstr);
+      DEBUG && printf("CALLED cleanUpAfterThread %ld FROM CREATE()\n", thread->id);
+      cleanUpAfterThread(thread);
       return ThrowException(Exception::TypeError(String::New("create(): error in pthread_create()")));
+    }
+    else {
+    
+#ifdef TAGG_USE_LIBUV
+      uv_async_init(uv_default_loop(), &thread->async_watcher, Callback);
+#else
+      ev_async_init(&thread->async_watcher, Callback);
+      ev_async_start(EV_DEFAULT_UC_ &thread->async_watcher);
+      ev_ref(EV_DEFAULT_UC);
+#endif
+    
     }
 
     return scope.Close(thread->JSObject);

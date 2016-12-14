@@ -1,4 +1,4 @@
-(function (thread) {
+(function (thread,CHUNK) {
   'use strict';
   
   //2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
@@ -11,8 +11,10 @@
     return this;
   }
 
+  CHUNK= 8192;
   function dispatchNextTicks (len,i) {
-    if (len= thread._ntq.length) {
+    if (thread._ntq.length) {
+      len= thread._ntq.length > CHUNK ? CHUNK : thread._ntq.length;
       i= 0;
       try {
         do { thread._ntq[i++]() } while (i<len);

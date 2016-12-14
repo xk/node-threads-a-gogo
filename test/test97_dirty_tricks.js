@@ -8,7 +8,7 @@ while (howmany--) {
 
 
 function f (i, ctr) {
-  i= 555908, ctr= 0;
+  i= 1234567, ctr= 0;
   thread._ntq.push(g);
   function g () {
     if (i--) ctr+= 1, thread._ntq.push(g);
