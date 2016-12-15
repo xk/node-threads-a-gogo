@@ -139,6 +139,7 @@ static long int threadsCtr= 0;
 static Persistent<String> id_symbol;
 static Persistent<String> load_symbol;
 static Persistent<Object> load_js;
+static Persistent<Object> events_js;
 static Persistent<ObjectTemplate> threadTemplate;
 
 
@@ -329,62 +330,57 @@ static void* threadBootProc (void* arg) {
 
 
 
-static void eventLoop (typeThread* thread) {
-
 // The thread's eventloop runs in the thread(s) not in node's main thread
-
+static void eventLoop (typeThread* thread) {
   DEBUG && printf("THREAD %ld EVENTLOOP ENTER\n", thread->id);
 
   thread->isolate->Enter();
   thread->context= Context::New();
   thread->context->Enter();
   
-  {
-    HandleScope scope1;
-    Persistent<String> _ntq= Persistent<String>::New(String::NewSymbol("_ntq"));
-    Local<Object> global= thread->context->Global();
-    global->Set(String::NewSymbol("puts"), FunctionTemplate::New(Puts)->GetFunction());
-    Local<Object> threadObject= Object::New();
-    global->Set(String::NewSymbol("thread"), threadObject);
-    threadObject->Set(String::NewSymbol("id"), Number::New(thread->id));
-    threadObject->Set(String::NewSymbol("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
-    Local<Object> threadDispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
-    Local<Object> dispatchNextTicks= Script::Compile(String::New(kNextTick_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
+
+  HandleScope scope1;
+  Persistent<String> _ntq= Persistent<String>::New(String::NewSymbol("_ntq"));
+  Local<Object> global= thread->context->Global();
+  global->Set(String::NewSymbol("puts"), FunctionTemplate::New(Puts)->GetFunction());
+  Local<Object> threadObject= Object::New();
+  global->Set(String::NewSymbol("thread"), threadObject);
+  threadObject->Set(String::NewSymbol("id"), Number::New(thread->id));
+  threadObject->Set(String::NewSymbol("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
+  Local<Object> threadDispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
+  Local<Object> dispatchNextTicks= Script::Compile(String::New(kNextTick_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
     
-    //SetFatalErrorHandler(FatalErrorCB);
+  //SetFatalErrorHandler(FatalErrorCB);
     
-    typeJob* job;
-    typeQueueItem *qitem= NULL;
-    typeQueueItem *qitem2, *qitem3;
-    while (1) {
+  double ntql;
+  typeJob* job;
+  typeQueueItem *qitem= NULL;
+  typeQueueItem *qitem2, *qitem3;
+    
+  while (1) {
       
-      {
-        HandleScope scope2;
-        TryCatch onError;
-        String::Utf8Value* str;
-        Local<String> source;
-        Local<Script> script;
-        Local<Value> resultado;
-        double ntql;
+      TryCatch onError;
         
-        DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
+      DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
         
-        while (1) {
+      while (1) {
           
           DEBUG && printf("THREAD %ld WHILE\n", thread->id);
           
           if (thread->sigkill == kKillRudely) break;
+          else if (qitem || (qitem= qPull(thread->processToThreadQueue))) {
           
-          if (qitem || (qitem= qPull(thread->processToThreadQueue))) {
-            HandleScope scope;
-            
             qitem2= qitem;
             qitem= NULL;
             DEBUG && printf("THREAD %ld QITEM\n", thread->id);
             job= &qitem2->job;
             if (job->jobType == kJobTypeEval) {
-              //Ejecutar un texto
               HandleScope scope;
+              
+              Local<Script> script;
+              Local<String> source;
+              String::Utf8Value* str;
+              Local<Value> resultado;
               
               if (job->eval.useStringObject) {
                 str= job->eval.scriptText_StringObject;
@@ -415,9 +411,10 @@ static void eventLoop (typeThread* thread) {
             }
             else if (job->jobType == kJobTypeEvent) {
               HandleScope scope;
-              //Emitir evento.
             
               Local<Value> args[2];
+              String::Utf8Value* str;
+              
               str= job->event.eventName;
               args[0]= String::New(**str, (*str).length());
               delete str;
@@ -442,23 +439,21 @@ static void eventLoop (typeThread* thread) {
             DEBUG && printf("THREAD %ld NO QITEM\n", thread->id);
 
           if (thread->sigkill == kKillRudely) break;
-          
-          {
+          else {
             HandleScope scope;
             DEBUG && printf("THREAD %ld NTQL\n", thread->id);
             ntql= dispatchNextTicks->CallAsFunction(threadObject, 0, NULL)->ToNumber()->Value();
             if (onError.HasCaught()) onError.Reset();
           }
           
-          if (!ntql && !(qitem || (qitem= qPull(thread->processToThreadQueue)))) {
+          if (thread->sigkill == kKillRudely) break;
+          else if (!ntql && !(qitem || (qitem= qPull(thread->processToThreadQueue)))) {
             DEBUG && printf("THREAD %ld EXIT WHILE: NO NTQL AND NO QITEM\n", thread->id);
             break;
           }
           
         }
-        
-      }
-      
+
       if (thread->sigkill) break;
 
       V8::IdleNotification();
@@ -495,8 +490,6 @@ static void eventLoop (typeThread* thread) {
       
     }
 
-  }
-  
   thread->context.Dispose();
   DEBUG && printf("THREAD %ld EVENTLOOP EXIT\n", thread->id);
 }
@@ -615,7 +608,6 @@ static void Callback (
       job->done= 1;
       
       if (onError.HasCaught()) {
-        WAKEUP_EVENT_LOOP
         node::FatalException(onError);
         return;
       }
@@ -815,12 +807,9 @@ static Handle<Value> Create (const Arguments &args) {
     thread->threadToProcessQueue= nuQueue();
     thread->nodeJSObject= Persistent<Object>::New(threadTemplate->NewInstance());
     thread->nodeJSObject->SetPointerInInternalField(0, thread);
-    thread->nodeJSObject->Set(id_symbol, Integer::New(thread->id));
-    Local<Value> dispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(thread->nodeJSObject, 0, NULL);
-    thread->nodeDispatchEvents= Persistent<Object>::New(dispatchEvents->ToObject());
-    
-    printf("LO INTENTO PERO NO VA\n"), fflush(stdout);
     thread->nodeJSObject->Set(load_symbol, load_js);
+    thread->nodeJSObject->Set(id_symbol, Integer::New(thread->id));
+    thread->nodeDispatchEvents= Persistent<Object>::New(events_js->CallAsFunction(thread->nodeJSObject, 0, NULL)->ToObject());
     
     pthread_cond_init(&(thread->idle_cv), NULL);
     pthread_mutex_init(&(thread->idle_mutex), NULL);
@@ -866,6 +855,7 @@ void Init (Handle<Object> target) {
   id_symbol= Persistent<String>::New(String::NewSymbol("id"));
   load_symbol= Persistent<String>::New(String::NewSymbol("load"));
   load_js= Persistent<Object>::New(Script::Compile(String::New(kLoad_js))->Run()->ToObject());
+  events_js= Persistent<Object>::New(Script::Compile(String::New(kEvents_js))->Run()->ToObject());
   
   target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
   target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kCreatePool_js))->Run()->ToObject());
