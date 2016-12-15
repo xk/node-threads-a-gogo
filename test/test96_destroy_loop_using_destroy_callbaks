@@ -1,0 +1,19 @@
+tagg= require('threads_a_gogo');
+howmany= +process.argv[2] || 2;
+loops= +process.argv[3] || 2000;
+process.stdout.write('Using '+ howmany+ ' threads, '+ loops+ 'loops \n');
+holder= [];
+while (howmany--) create();
+
+function nop () {}
+
+function create (t) { t=tagg.create(); t.destroy(0, cb); holder.push(t); }
+
+ctr= 0;
+function cb () {
+  ctr+= 1;
+  console.log("DESTROY() CALLBACK #"+ ctr);
+  if (ctr < loops) create();
+}
+
+
