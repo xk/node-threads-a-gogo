@@ -1,24 +1,18 @@
 var tagg= require('threads_a_gogo');
 
 function cb (e,m) {
-  process.nextTick(again);
-  console.log('['+this.id+'].destroy()');
+  process.nextTick(create);
+  process.stdout.write('['+this.id+'].destroy()\r');
   this.destroy();
 }
 
-
-function again () {
+function create () {
   tagg.create().eval('0', cb);
 }
 
-
 var i= +process.argv[2] || 2;
 console.log('Using '+ i+ ' threads');
-
-
-
-while (i--) again();
-
+while (i--) create();
 
 process.on('exit', function () {
   console.log("process.on('exit') -> BYE!");

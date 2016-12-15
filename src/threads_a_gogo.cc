@@ -134,16 +134,12 @@ static Handle<Value> Create (const Arguments &args);
 void Init (Handle<Object> target);
 
 
+
 static bool useLocker;
 static long int threadsCtr= 0;
+static Persistent<Object> boot_js;
 static Persistent<String> id_symbol;
-static Persistent<String> load_symbol;
-static Persistent<Object> load_js;
-static Persistent<Object> events_js;
 static Persistent<ObjectTemplate> threadTemplate;
-
-
-
 
 /*
 
@@ -154,14 +150,19 @@ cat ../../../src/load.js | ./minify kLoad_js > ../../../src/kLoad_js
 cat ../../../src/createPool.js | ./minify kCreatePool_js > ../../../src/kCreatePool_js
 cat ../../../src/nextTick.js | ./minify kNextTick_js > ../../../src/kNextTick_js
 
+//node-waf configure uninstall distclean configure build install
+
 */
 
-#include "load.js.c"
-#include "events.js.c"
-#include "nextTick.js.c"
+#include "boot.js.c"
+//#include "load.js.c"
+//#include "events.js.c"
+//#include "nextTick.js.c"
 #include "createPool.js.c"
 
-//node-waf configure uninstall distclean configure build install
+
+
+
 
 
 
@@ -171,6 +172,13 @@ static inline void qPush (typeQueueItem* qitem, typeQueue* queue) {
   queue->pushPtr->next= qitem;
   queue->pushPtr= qitem;
 }
+
+
+
+
+
+
+
 
 static inline typeQueueItem* qPull (typeQueue* queue) {
   typeQueueItem* qitem= queue->pullPtr;
@@ -182,10 +190,24 @@ static inline typeQueueItem* qPull (typeQueue* queue) {
   return qitem->job.done ? NULL : qitem;
 }
 
+
+
+
+
+
+
+
 static inline typeQueueItem* nuQitem () {
   typeQueueItem* qitem= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
   return qitem;
 }
+
+
+
+
+
+
+
 
 static typeQueue* nuQueue () {
   typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
@@ -194,6 +216,13 @@ static typeQueue* nuQueue () {
   queue->pullPtr= queue->pushPtr= qitem;
   return queue;
 }
+
+
+
+
+
+
+
 
 static void destroyQueue (typeQueue* queue) {
   typeQueueItem* qitem= queue->pullPtr;
@@ -204,6 +233,9 @@ static void destroyQueue (typeQueue* queue) {
   }
   free(queue);
 }
+
+
+
 
 
 
@@ -221,6 +253,8 @@ static typeThread* isAThread (Handle<Object> receiver) {
   }
   return NULL;
 }
+
+
 
 
 
@@ -259,6 +293,8 @@ static void pushJobToThread (typeQueueItem* qitem, typeThread* thread) {
 
 
 
+
+
 static Handle<Value> Puts (const Arguments &args) {
   int i= 0;
   while (i < args.Length()) {
@@ -270,10 +306,6 @@ static Handle<Value> Puts (const Arguments &args) {
   fflush(stdout);
   return Undefined();
 }
-
-
-
-
 
 
 
@@ -327,9 +359,6 @@ static void* threadBootProc (void* arg) {
 
 
 
-
-
-
 // The thread's eventloop runs in the thread(s) not in node's main thread
 static void eventLoop (typeThread* thread) {
   DEBUG && printf("THREAD %ld EVENTLOOP ENTER\n", thread->id);
@@ -340,25 +369,24 @@ static void eventLoop (typeThread* thread) {
   
 
   HandleScope scope1;
-  Persistent<String> _ntq= Persistent<String>::New(String::NewSymbol("_ntq"));
   Local<Object> global= thread->context->Global();
-  global->Set(String::NewSymbol("puts"), FunctionTemplate::New(Puts)->GetFunction());
+  global->Set(String::New("puts"), FunctionTemplate::New(Puts)->GetFunction());
   Local<Object> threadObject= Object::New();
-  global->Set(String::NewSymbol("thread"), threadObject);
-  threadObject->Set(String::NewSymbol("id"), Number::New(thread->id));
-  threadObject->Set(String::NewSymbol("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
-  Local<Object> threadDispatchEvents= Script::Compile(String::New(kEvents_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
-  Local<Object> dispatchNextTicks= Script::Compile(String::New(kNextTick_js))->Run()->ToObject()->CallAsFunction(threadObject, 0, NULL)->ToObject();
-    
+  threadObject->Set(String::New("id"), Number::New(thread->id));
+  threadObject->Set(String::New("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
+  Local<Object> script= Local<Object>::New(Script::Compile(String::New(kBoot_js))->Run()->ToObject());
+  Local<Object> r= script->CallAsFunction(threadObject, 0, NULL)->ToObject();
+  Local<Object> dnt= r->Get(String::New("dnt"))->ToObject();
+  Local<Object> dev= r->Get(String::New("dev"))->ToObject();
+  
   //SetFatalErrorHandler(FatalErrorCB);
     
-  double ntql;
-  typeJob* job;
-  typeQueueItem *qitem= NULL;
-  typeQueueItem *qitem2, *qitem3;
-    
   while (1) {
-      
+  
+      double ntql;
+      typeJob* job;
+      typeQueueItem *qitem= NULL;
+      typeQueueItem *qitem2, *qitem3;
       TryCatch onError;
         
       DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
@@ -431,7 +459,7 @@ static void eventLoop (typeThread* thread) {
               }
             
               free(job->event.argumentos);
-              threadDispatchEvents->CallAsFunction(global, 2, args);
+              dev->CallAsFunction(global, 2, args);
               job->done= 1;
             }
           }
@@ -442,7 +470,7 @@ static void eventLoop (typeThread* thread) {
           else {
             HandleScope scope;
             DEBUG && printf("THREAD %ld NTQL\n", thread->id);
-            ntql= dispatchNextTicks->CallAsFunction(threadObject, 0, NULL)->ToNumber()->Value();
+            ntql= dnt->CallAsFunction(global, 0, NULL)->ToNumber()->Value();
             if (onError.HasCaught()) onError.Reset();
           }
           
@@ -496,6 +524,11 @@ static void eventLoop (typeThread* thread) {
 
 
 
+
+
+
+
+
 static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
   HandleScope scope;
   typeThread* thread= (typeThread*) arg;
@@ -505,6 +538,12 @@ static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
   } 
   free(thread);
 }
+
+
+
+
+
+
 
 
 static void cleanUpAfterThread (typeThread* thread) {
@@ -544,6 +583,8 @@ static void cleanUpAfterThread (typeThread* thread) {
     free(thread);
   }
 }
+
+
 
 
 
@@ -643,6 +684,8 @@ static void Callback (
 
 
 
+
+
 // Tell a thread to quit, either nicely or rudely.
 static Handle<Value> Destroy (const Arguments &args) {
 
@@ -693,6 +736,8 @@ static Handle<Value> Destroy (const Arguments &args) {
 
 
 
+
+
 // Eval: Pushes a job into the thread's ->processToThreadQueue.
 static Handle<Value> Eval (const Arguments &args) {
   HandleScope scope;
@@ -728,10 +773,6 @@ static Handle<Value> Eval (const Arguments &args) {
 
 
 
-
-
-
-
 static Handle<Value> processEmit (const Arguments &args) {
   HandleScope scope;
   
@@ -758,6 +799,8 @@ static Handle<Value> processEmit (const Arguments &args) {
   pushJobToThread(qitem, thread);
   return args.This();
 }
+
+
 
 
 
@@ -807,9 +850,8 @@ static Handle<Value> Create (const Arguments &args) {
     thread->threadToProcessQueue= nuQueue();
     thread->nodeJSObject= Persistent<Object>::New(threadTemplate->NewInstance());
     thread->nodeJSObject->SetPointerInInternalField(0, thread);
-    thread->nodeJSObject->Set(load_symbol, load_js);
     thread->nodeJSObject->Set(id_symbol, Integer::New(thread->id));
-    thread->nodeDispatchEvents= Persistent<Object>::New(events_js->CallAsFunction(thread->nodeJSObject, 0, NULL)->ToObject());
+    thread->nodeDispatchEvents= Persistent<Object>::New(boot_js->CallAsFunction(thread->nodeJSObject, 0, NULL)->ToObject());
     
     pthread_cond_init(&(thread->idle_cv), NULL);
     pthread_mutex_init(&(thread->idle_mutex), NULL);
@@ -848,17 +890,16 @@ static Handle<Value> Create (const Arguments &args) {
 }
 
 
-void Init (Handle<Object> target) {
 
-  HandleScope scope;
+
+
+
+
+
+void Init (Handle<Object> target) {
   useLocker= v8::Locker::IsActive();
   id_symbol= Persistent<String>::New(String::NewSymbol("id"));
-  load_symbol= Persistent<String>::New(String::NewSymbol("load"));
-  load_js= Persistent<Object>::New(Script::Compile(String::New(kLoad_js))->Run()->ToObject());
-  events_js= Persistent<Object>::New(Script::Compile(String::New(kEvents_js))->Run()->ToObject());
-  
-  target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
-  target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kCreatePool_js))->Run()->ToObject());
+  boot_js= Persistent<Object>::New(Script::Compile(String::New(kBoot_js))->Run()->ToObject());
   
   threadTemplate= Persistent<ObjectTemplate>::New(ObjectTemplate::New());
   threadTemplate->SetInternalFieldCount(1);
@@ -867,6 +908,8 @@ void Init (Handle<Object> target) {
   threadTemplate->Set(String::NewSymbol("emit"), FunctionTemplate::New(processEmit));
   threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));
   
+  target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
+  target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kCreatePool_js))->Run()->ToObject());
 }
 
 

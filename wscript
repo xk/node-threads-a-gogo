@@ -27,14 +27,16 @@ def cmd(filename,varName):
 # but note that it's done automatically by node-waf build/install
 def minify(ctxt):
   print "\n**** Minifying .js source files"
+  subprocess.check_call(["sh", "-c", cmd("boot.js","kBoot_js")])
+  print ""
   subprocess.check_call(["sh", "-c", cmd("createPool.js","kCreatePool_js")])
   print ""
-  subprocess.check_call(["sh", "-c", cmd("events.js","kEvents_js")])
-  print ""
-  subprocess.check_call(["sh", "-c", cmd("load.js","kLoad_js")])
-  print ""
-  subprocess.check_call(["sh", "-c", cmd("nextTick.js","kNextTick_js")])
-  print ""
+#  subprocess.check_call(["sh", "-c", cmd("events.js","kEvents_js")])
+#  print ""
+#  subprocess.check_call(["sh", "-c", cmd("load.js","kLoad_js")])
+#  print ""
+#  subprocess.check_call(["sh", "-c", cmd("nextTick.js","kNextTick_js")])
+#  print ""
 
 def configure(conf):
   print ""
