@@ -2,7 +2,7 @@
   'use strict';
   
   //2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
-  //threads_a_gogo_createPool.js
+  //threads_a_gogo createPool.js
   
   tagg= this;
   

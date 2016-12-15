@@ -1,43 +1,42 @@
-(function (thread) {
+(function (that) {
   'use strict';
   
   //2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
-  //threads_a_gogo_events.js
+  //threads_a_gogo events.js
   
-  thread= this;
+  that= this;
 
   function on (event,f,q) {
-    (q= thread._on[event]) ? q.push(f) : (thread._on[event]= [f]);
-    return thread;
+    (q= that._on[event]) ? q.push(f) : (that._on[event]= [f]);
+    return that;
   }
 
   function once (event,f,q) {
-    (q= thread._on[event]) ? 0 : (q= thread._on[event]= []);
+    (q= that._on[event]) ? 0 : (q= that._on[event]= []);
     q.once ? q.once.push(f) : (q.once= [f]);
-    return thread;
+    return that;
   }
   
   function removeAllListeners (event) {
-    event ? delete thread._on[event] : (thread._on= {});
-    return thread;
+    event ? delete that._on[event] : (that._on= {});
+    return that;
   }
   
   function dispatchEvents (event,args,q) {
-    q= thread._on[event];
+    q= that._on[event];
     if (q) {
       if (q.once) {
-        q.once.forEach(function (v,i,o) { v.apply(thread,args) });
+        q.once.forEach(function (v,i,o) { v.apply(that,args) });
         delete q.once;
       }
-      q.forEach(function (v,i,o) { v.apply(thread,args) });
-      q= q.once;
+      q.forEach(function (v,i,o) { v.apply(that,args) });
     }
   }
   
-  thread.on= on;
-  thread._on= {};
-  thread.once= once;
-  thread.removeAllListeners= removeAllListeners;
+  that.on= on;
+  that._on= {};
+  that.once= once;
+  that.removeAllListeners= removeAllListeners;
   
   return dispatchEvents;
 })
