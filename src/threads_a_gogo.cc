@@ -402,7 +402,7 @@ static void eventLoop (typeThread* thread) {
 
               if (job->eval.tiene_callBack) {
                 qitem3= nuQitem();
-                memcpy((void*)qitem3, (void*)qitem2, sizeof(typeQueueItem));
+                memcpy(qitem3, qitem2, sizeof(typeQueueItem));
                 qitem3->job.eval.error= onError.HasCaught() ? 1 : 0;
                 qitem3->job.eval.resultado= new String::Utf8Value(job->eval.error ? onError.Exception() : resultado);
                 qPush(qitem3, thread->threadToProcessQueue);
