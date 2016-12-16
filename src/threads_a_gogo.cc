@@ -67,6 +67,7 @@ typedef struct typeQueueItem {
 } typeQueueItem;
 
 typedef struct typeQueue {
+  typeQueueItem* first;
   typeQueueItem* pushPtr;
   typeQueueItem* pullPtr;
 } typeQueue;
@@ -110,6 +111,7 @@ typedef struct typeThread {
 
 static inline void qPush (typeQueueItem* qitem, typeQueue* queue);
 static inline typeQueueItem* qPull (typeQueue* queue);
+static inline typeQueueItem* qUsed (typeQueue* queue);
 static inline typeQueueItem* nuQitem ();
 static typeQueue* nuQueue ();
 static void destroyQueue (typeQueue* q);
@@ -184,7 +186,6 @@ static inline typeQueueItem* qPull (typeQueue* queue) {
   typeQueueItem* qitem= queue->pullPtr;
   while (qitem->job.done && qitem->next) {
     queue->pullPtr= qitem->next;
-    free(qitem);
     qitem= queue->pullPtr;
   }
   return qitem->job.done ? NULL : qitem;
@@ -197,8 +198,14 @@ static inline typeQueueItem* qPull (typeQueue* queue) {
 
 
 
-static inline typeQueueItem* nuQitem () {
-  typeQueueItem* qitem= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+static inline typeQueueItem* qUsed (typeQueue* queue) {
+  typeQueueItem* qitem= NULL;
+  if (queue->first != queue->pullPtr) {
+    qitem= queue->first;
+    queue->first= qitem->next;
+    qitem->job.done= 0;
+    qitem->next= NULL;
+  }
   return qitem;
 }
 
@@ -209,11 +216,25 @@ static inline typeQueueItem* nuQitem () {
 
 
 
+static inline typeQueueItem* nuQitem (typeQueue* queue) {
+  typeQueueItem* qitem= NULL;
+  if (queue) qitem= qUsed(queue);
+  if (!qitem) qitem= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+  return qitem;
+}
+
+
+
+
+
+
+
+//Sólo se debe usar en main/node's thread !
 static typeQueue* nuQueue () {
   typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
-  typeQueueItem* qitem= nuQitem();
+  typeQueueItem* qitem= nuQitem(NULL);
   qitem->job.done= 1;
-  queue->pullPtr= queue->pushPtr= qitem;
+  queue->first= queue->pullPtr= queue->pushPtr= qitem;
   return queue;
 }
 
@@ -225,11 +246,11 @@ static typeQueue* nuQueue () {
 
 
 static void destroyQueue (typeQueue* queue) {
-  typeQueueItem* qitem= queue->pullPtr;
+  typeQueueItem* qitem= queue->first;
   while (qitem) {
-    queue->pullPtr= qitem->next;
+    queue->first= qitem->next;
     free(qitem);
-    qitem= queue->pullPtr;
+    qitem= queue->first;
   }
   free(queue);
 }
@@ -261,15 +282,11 @@ static typeThread* isAThread (Handle<Object> receiver) {
 
 
 
-static void pushJobToThread (typeQueueItem* qitem, typeThread* thread) {
+static void wakeUpThread (typeThread* thread) {
 
 //Esto se ejecuta siempre en node's main thread
 
   DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #1\n", thread->id);
-  //Esto garantiza que haya algo en la queue porque si no
-  //la thread podría echarse a dormir (tb podría ya estar durmiendo)
-  //si ve que no hay nada en la queue
-  qPush(qitem, thread->processToThreadQueue);
   
   //Cogiendo este lock sabemos que la thread o no ha salido aún
   //del event loop o está parada en wait/sleep/idle
@@ -425,7 +442,7 @@ static void eventLoop (typeThread* thread) {
               if (!onError.HasCaught()) resultado= script->Run();
 
               if (job->eval.tiene_callBack) {
-                qitem3= nuQitem();
+                qitem3= nuQitem(thread->threadToProcessQueue);
                 memcpy(qitem3, qitem2, sizeof(typeQueueItem));
                 qitem3->job.eval.error= onError.HasCaught() ? 1 : 0;
                 qitem3->job.eval.resultado= new String::Utf8Value(job->eval.error ? onError.Exception() : resultado);
@@ -751,7 +768,7 @@ static Handle<Value> Eval (const Arguments &args) {
     return ThrowException(Exception::TypeError(String::New("thread.eval(): the receiver must be a thread object")));
   }
 
-  typeQueueItem* qitem= nuQitem();
+  typeQueueItem* qitem= nuQitem(thread->processToThreadQueue);
   typeJob* job= &qitem->job;
   
   job->eval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
@@ -762,7 +779,8 @@ static Handle<Value> Eval (const Arguments &args) {
   job->eval.useStringObject= 1;
   job->jobType= kJobTypeEval;
   
-  pushJobToThread(qitem, thread);
+  qPush(qitem, thread->processToThreadQueue);
+  wakeUpThread(thread);
   return args.This();
 }
 
@@ -783,7 +801,7 @@ static Handle<Value> processEmit (const Arguments &args) {
     return ThrowException(Exception::TypeError(String::New("thread.emit(): the receiver must be a thread object")));
   }
   
-  typeQueueItem* qitem= nuQitem();
+  typeQueueItem* qitem= nuQitem(thread->processToThreadQueue);
   typeJob* job= &qitem->job;
   
   job->jobType= kJobTypeEvent;
@@ -796,7 +814,8 @@ static Handle<Value> processEmit (const Arguments &args) {
     job->event.argumentos[i-1]= new String::Utf8Value(args[i]);
   } while (++i <= job->event.length);
   
-  pushJobToThread(qitem, thread);
+  qPush(qitem, thread->processToThreadQueue);
+  wakeUpThread(thread);
   return args.This();
 }
 
@@ -813,7 +832,7 @@ static Handle<Value> threadEmit (const Arguments &args) {
   if (!args.Length()) return args.This();
   
   typeThread* thread= (typeThread*) Isolate::GetCurrent()->GetData();
-  typeQueueItem* qitem= nuQitem();
+  typeQueueItem* qitem= nuQitem(thread->threadToProcessQueue);
   typeJob* job= &qitem->job;
   
   job->jobType= kJobTypeEvent;
