@@ -271,7 +271,7 @@ static typeQueue* nuQueue () {
   if (!qitem) qitem= nuQitem(NULL);
   queue->first= qitem;
   qitem->job.done= 1;
-  int i= 64;
+  int i= 96;
   while (--i) {
     qitem->next= qitemStorePull();
     if (!qitem->next) qitem->next= nuQitem(NULL);
@@ -330,7 +330,7 @@ static typeQueue* qitemStoreInit () {
   DEBUG && printf("Q_ITEM_STORE_INIT\n");
   typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
   typeQueueItem* qitem= queue->first= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
-  int i= 8192;
+  int i= 2048;
   while (i--) {
     qitem->next= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
     qitem= qitem->next;

@@ -5,7 +5,7 @@ console.log("Using "+ i+ " threads.");
 function program () {
   var i= 0;
   function ƒ () {
-    puts(" ["+ thread.id+ "]"+ (++i));
+    puts(" ["+ thread.id+ "]"+ (++i)+ '\r');
     thread.nextTick(ƒ);
   }
   ƒ();
