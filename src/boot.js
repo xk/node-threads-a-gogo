@@ -1,30 +1,30 @@
 //2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
 //threads_a_gogo boot.js
   
-(function boot (that,CHUNK,_on) {
+(function boot (that,CHUNK,_on,_ntq) {
 
   that= this;
   
   function nextTick (cb) {
-    that._ntq.push(cb);
+    _ntq.push(cb);
     return that;
   }
 
   CHUNK= 8192;
   function dispatchNextTicks (len,i) {
-    if (that._ntq.length) {
-      len= that._ntq.length > CHUNK ? CHUNK : that._ntq.length;
+    if (_ntq.length) {
+      len= _ntq.length > CHUNK ? CHUNK : _ntq.length;
       i= 0;
       try {
-        do { that._ntq[i++]() } while (i<len);
-        that._ntq= that._ntq.splice(i);
+        do { _ntq[i++]() } while (i<len);
+        that._ntq= _ntq= _ntq.splice(i);
       }
       catch (e) {
-        that._ntq= that._ntq.splice(i);
+        that._ntq= _ntq= _ntq.splice(i);
         throw e;
       }
     }
-    return that._ntq.length;
+    return _ntq.length;
   }
 
   function load (path, cb) {
@@ -48,14 +48,14 @@
     return that;
   }
   
-  function dispatchEvents (event,args,q) {
-    q= _on[event];
+  function dispatchEvents (evento, argumentos) {
+    var q= _on[evento];
     if (q) {
       if (q.once) {
-        q.once.forEach(function (v,i,o) { v.apply(that,args) });
+        q.once.forEach(function (v,i,o) { v.apply(that, argumentos) });
         delete q.once;
       }
-      q.forEach(function (v,i,o) { v.apply(that,args) });
+      q.forEach(function (v,i,o) { v.apply(that, argumentos) });
     }
   }
   
@@ -63,7 +63,7 @@
     thread= that;
     that.on= on;
     that._on= _on= {};
-    that._ntq= [];
+    that._ntq= _ntq= [];
     that.once= once;
     that.nextTick= nextTick;
     that.removeAllListeners= removeAllListeners;
