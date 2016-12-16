@@ -10,6 +10,7 @@
 #include <pthread.h>
 #include <stdlib.h>
 #include <string>
+#include <assert.h>
 
 static int DEBUG= 0;
 
@@ -31,7 +32,8 @@ using namespace v8;
 
 typedef enum jobTypes {
   kJobTypeEval,
-  kJobTypeEvent
+  kJobTypeEvent,
+  kJobTypeNone
 } jobTypes;
 
 typedef struct typeEvent {
@@ -68,8 +70,11 @@ typedef struct typeQueueItem {
 
 typedef struct typeQueue {
   typeQueueItem* first;
-  typeQueueItem* pushPtr;
   typeQueueItem* pullPtr;
+  union {
+    typeQueueItem* pushPtr;
+    typeQueueItem* last;
+  };
 } typeQueue;
 
 typedef enum killTypes {
@@ -108,12 +113,15 @@ typedef struct typeThread {
 } typeThread;
 
 
-
+static inline void beep ();
 static inline void qPush (typeQueueItem* qitem, typeQueue* queue);
 static inline typeQueueItem* qPull (typeQueue* queue);
 static inline typeQueueItem* qUsed (typeQueue* queue);
 static inline typeQueueItem* nuQitem ();
 static typeQueue* nuQueue ();
+static void qitemStorePush (typeQueueItem* qitem);
+static typeQueueItem* qitemStorePull ();
+static typeQueue* qitemStoreInit ();
 static void destroyQueue (typeQueue* q);
 static typeThread* isAThread (Handle<Object> receiver);
 static void pushJobToThread (typeQueueItem* qitem, typeThread* thread);
@@ -142,7 +150,7 @@ static long int threadsCtr= 0;
 static Persistent<Object> boot_js;
 static Persistent<String> id_symbol;
 static Persistent<ObjectTemplate> threadTemplate;
-
+static typeQueue* qitemStore;
 /*
 
 cd deps/minifier/src
@@ -169,8 +177,22 @@ cat ../../../src/nextTick.js | ./minify kNextTick_js > ../../../src/kNextTick_js
 
 
 
+static inline void beep () {
+  printf("\x07"), fflush (stdout);
+}
+
+
+
+
+
+
+
+
 static inline void qPush (typeQueueItem* qitem, typeQueue* queue) {
+  DEBUG && printf("Q_PUSH\n");
   qitem->next= NULL;
+  assert(queue->pushPtr != NULL);
+  assert(queue->pushPtr->next == NULL);
   queue->pushPtr->next= qitem;
   queue->pushPtr= qitem;
 }
@@ -183,7 +205,9 @@ static inline void qPush (typeQueueItem* qitem, typeQueue* queue) {
 
 
 static inline typeQueueItem* qPull (typeQueue* queue) {
+  DEBUG && printf("Q_PULL\n");
   typeQueueItem* qitem= queue->pullPtr;
+  assert(queue->pullPtr != NULL);
   while (qitem->job.done && qitem->next) {
     queue->pullPtr= qitem->next;
     qitem= queue->pullPtr;
@@ -199,11 +223,14 @@ static inline typeQueueItem* qPull (typeQueue* queue) {
 
 
 static inline typeQueueItem* qUsed (typeQueue* queue) {
+  DEBUG && printf("Q_USED\n");
   typeQueueItem* qitem= NULL;
+  assert(queue->first != NULL);
+  assert(queue->pullPtr != NULL);
   if (queue->first != queue->pullPtr) {
     qitem= queue->first;
+    assert(qitem->next != NULL);
     queue->first= qitem->next;
-    qitem->job.done= 0;
     qitem->next= NULL;
   }
   return qitem;
@@ -217,9 +244,16 @@ static inline typeQueueItem* qUsed (typeQueue* queue) {
 
 
 static inline typeQueueItem* nuQitem (typeQueue* queue) {
+  DEBUG && printf("Q_NU_Q_ITEM\n");
   typeQueueItem* qitem= NULL;
   if (queue) qitem= qUsed(queue);
-  if (!qitem) qitem= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+  if (!qitem) {
+    qitem= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+    beep();
+  }
+  qitem->job.jobType= kJobTypeNone;
+  qitem->job.done= 0;
+  qitem->next= NULL;
   return qitem;
 }
 
@@ -231,10 +265,77 @@ static inline typeQueueItem* nuQitem (typeQueue* queue) {
 
 //Sólo se debe usar en main/node's thread !
 static typeQueue* nuQueue () {
+  DEBUG && printf("Q_NU_QUEUE\n");
   typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
-  typeQueueItem* qitem= nuQitem(NULL);
+  typeQueueItem* qitem= qitemStorePull();
+  if (!qitem) qitem= nuQitem(NULL);
+  queue->first= qitem;
   qitem->job.done= 1;
-  queue->first= queue->pullPtr= queue->pushPtr= qitem;
+  int i= 64;
+  while (--i) {
+    qitem->next= qitemStorePull();
+    if (!qitem->next) qitem->next= nuQitem(NULL);
+    qitem= qitem->next;
+    qitem->job.done= 1;
+  }
+  qitem->next= NULL;
+  queue->pullPtr= queue->pushPtr= qitem;
+  return queue;
+}
+
+
+
+
+
+
+
+//Sólo se debe usar en main/node's thread !
+static void qitemStorePush (typeQueueItem* qitem) {
+  DEBUG && printf("Q_ITEM_STORE_PUSH\n");
+  qitem->next= NULL;
+  assert(qitemStore->last != NULL);
+  assert(qitemStore->last->next == NULL);
+  qitemStore->last->next= qitem;
+  qitemStore->last= qitem;
+}
+
+
+
+
+
+
+
+//Sólo se debe usar en main/node's thread !
+static typeQueueItem* qitemStorePull () {
+  DEBUG && printf("Q_ITEM_STORE_PULL\n");
+  typeQueueItem* qitem= NULL;
+  assert(qitemStore->first != NULL);
+  assert(qitemStore->last != NULL);
+  if (qitemStore->first != qitemStore->last) {
+    qitem= qitemStore->first;
+    assert(qitem->next != NULL);
+    qitemStore->first= qitem->next;
+  }
+  return qitem;
+}
+
+
+
+
+
+
+
+//Sólo se debe usar en main/node's thread !
+static typeQueue* qitemStoreInit () {
+  DEBUG && printf("Q_ITEM_STORE_INIT\n");
+  typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
+  typeQueueItem* qitem= queue->first= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+  int i= 8192;
+  while (i--) {
+    qitem->next= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+    qitem= qitem->next;
+  }
+  queue->last= qitem;
   return queue;
 }
 
@@ -246,11 +347,13 @@ static typeQueue* nuQueue () {
 
 
 static void destroyQueue (typeQueue* queue) {
-  typeQueueItem* qitem= queue->first;
-  while (qitem) {
-    queue->first= qitem->next;
-    free(qitem);
+  DEBUG && printf("Q_DESTROY_QUEUE\n");
+  typeQueueItem* qitem;
+  assert(queue->first != NULL);
+  while (queue->first) {
     qitem= queue->first;
+    queue->first= qitem->next;
+    qitemStorePush(qitem);
   }
   free(queue);
 }
@@ -427,6 +530,8 @@ static void eventLoop (typeThread* thread) {
               String::Utf8Value* str;
               Local<Value> resultado;
               
+              DEBUG && printf("THREAD %ld QITEM EVAL\n", thread->id);
+              
               if (job->eval.useStringObject) {
                 str= job->eval.scriptText_StringObject;
                 source= String::New(**str, (*str).length());
@@ -460,6 +565,8 @@ static void eventLoop (typeThread* thread) {
               Local<Value> args[2];
               String::Utf8Value* str;
               
+              DEBUG && printf("THREAD %ld QITEM EVENT\n", thread->id);
+              
               str= job->event.eventName;
               args[0]= String::New(**str, (*str).length());
               delete str;
@@ -478,6 +585,9 @@ static void eventLoop (typeThread* thread) {
               free(job->event.argumentos);
               dev->CallAsFunction(global, 2, args);
               job->done= 1;
+            }
+            else {
+              assert(1);
             }
           }
           else
@@ -569,7 +679,9 @@ static void cleanUpAfterThread (typeThread* thread) {
   
   //(*TO_DO*): hay que vaciar las colas y destruir los trabajos y sus objetos antes de ponerlas a NULL
   
+  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->processToThreadQueue)\n", thread->id);
   destroyQueue(thread->processToThreadQueue);
+  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->threadToProcessQueue)\n", thread->id);
   destroyQueue(thread->threadToProcessQueue);
   
   pthread_cond_destroy(&(thread->idle_cv));
@@ -645,7 +757,9 @@ static void Callback (
     job= &qitem->job;
 
     if (job->jobType == kJobTypeEval) {
-
+    
+      DEBUG && printf("CALLBACK kJobTypeEval IN MAIN THREAD\n");
+      
       if (job->eval.tiene_callBack) {
       
         str= job->eval.resultado;
@@ -671,7 +785,8 @@ static void Callback (
       }
     }
     else if (job->jobType == kJobTypeEvent) {
-      
+    
+      DEBUG && printf("CALLBACK kJobTypeEvent IN MAIN THREAD\n");
       //fprintf(stdout, "*** Callback\n");
       
       str= job->event.eventName;
@@ -692,6 +807,9 @@ static void Callback (
 
       thread->nodeDispatchEvents->CallAsFunction(Context::GetCurrent()->Global(), 2, args);
       job->done= 1;
+    }
+    else {
+      assert(1);
     }
   }
 }
@@ -842,7 +960,7 @@ static Handle<Value> threadEmit (const Arguments &args) {
     job->event.argumentos= (String::Utf8Value**) malloc(job->event.length * sizeof(void*));
     int i= 0;
     do {
-      job->event.argumentos[i]= new String::Utf8Value(args[i]);
+      job->event.argumentos[i]= new String::Utf8Value(args[i+1]);
     } while (++i < job->event.length);
   }
   
@@ -916,6 +1034,7 @@ static Handle<Value> Create (const Arguments &args) {
 
 
 void Init (Handle<Object> target) {
+  qitemStore= qitemStoreInit();
   useLocker= v8::Locker::IsActive();
   id_symbol= Persistent<String>::New(String::NewSymbol("id"));
   boot_js= Persistent<Object>::New(Script::Compile(String::New(kBoot_js))->Run()->ToObject());
