@@ -5,7 +5,7 @@
 
 (function boot0 (version,global) {
 
-version= '0.18';
+version= '0.1.8';
 global= (function () { return this })();
 
 if (global.process) {
