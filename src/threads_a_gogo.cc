@@ -702,6 +702,7 @@ static void cleanUpAfterThread (typeThread* thread) {
 #else
     ev_async_stop(EV_DEFAULT_UC_ &thread->async_watcher);
     ev_unref(EV_DEFAULT_UC);
+    cleanUpAfterThreadCallback((uv_handle_t*) thread);
 #endif
 
   }
@@ -1049,7 +1050,6 @@ void Init (Handle<Object> target) {
   target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
   target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kCreatePool_js))->Run()->ToObject());
 }
-
 
 NODE_MODULE(threads_a_gogo, Init)
 
