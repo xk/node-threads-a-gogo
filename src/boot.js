@@ -1,7 +1,15 @@
 //2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
 //threads_a_gogo boot.js
-  
-(function boot (that,CHUNK,_on,_ntq) {
+
+(function boot0 (version) {
+
+version= '0.18';
+
+if ((function () { return this })().process) {
+  process.versions.threads_a_gogo= version;
+}
+
+function boot (that,CHUNK,_on,_ntq) {
 
   that= this;
   
@@ -62,20 +70,25 @@
   if (!(function () { return this })().process) {
     thread= that;
     that.on= on;
+    that.once= once;
     that._on= _on= {};
     that._ntq= _ntq= [];
-    that.once= once;
     that.nextTick= nextTick;
     that.removeAllListeners= removeAllListeners;
+    that.version= version;
     return {dev:dispatchEvents, dnt:dispatchNextTicks};
   }
   else {
     that.on= on;
-    that._on= _on= {};
     that.once= once;
+    that._on= _on= {};
     that.load= load;
     that.removeAllListeners= removeAllListeners;
+    that.version= version;
     return dispatchEvents;
   }
   
-})
+}
+
+return boot;
+})()
