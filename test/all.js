@@ -31,4 +31,4 @@ function cb2 () {
   assert(1);
 }
 
-console.log('PASS');
+console.log('THREADS_A_GOGO BASIC FUNCTIONALITY TEST: OK, IT WORKS!');
