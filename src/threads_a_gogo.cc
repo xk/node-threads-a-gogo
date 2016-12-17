@@ -117,14 +117,14 @@ static inline void beep ();
 static inline void qPush (typeQueueItem* qitem, typeQueue* queue);
 static inline typeQueueItem* qPull (typeQueue* queue);
 static inline typeQueueItem* qUsed (typeQueue* queue);
-static inline typeQueueItem* nuQitem ();
+static inline typeQueueItem* nuQitem (typeQueue* queue);
 static typeQueue* nuQueue ();
 static void qitemStorePush (typeQueueItem* qitem);
 static typeQueueItem* qitemStorePull ();
 static typeQueue* qitemStoreInit ();
 static void destroyQueue (typeQueue* q);
 static typeThread* isAThread (Handle<Object> receiver);
-static void pushJobToThread (typeQueueItem* qitem, typeThread* thread);
+static void wakeUpThread (typeThread* thread);
 static Handle<Value> Puts (const Arguments &args);
 static void* threadBootProc (void* arg);
 static void eventLoop (typeThread* thread);
@@ -1055,4 +1055,8 @@ NODE_MODULE(threads_a_gogo, Init)
 
 /*
 gcc -E -I /Users/jorge/JAVASCRIPT/binarios/include/node -o /o.c /Users/jorge/JAVASCRIPT/threads_a_gogo/src/threads_a_gogo.cc && mate /o.c
+
+tagg=require('threads_a_gogo')
+process.versions
+t=tagg.create()
 */
