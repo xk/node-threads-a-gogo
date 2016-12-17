@@ -1,7 +1,7 @@
 var tagg= require('threads_a_gogo');
 
 function cb (e,m) {
-  process.nextTick(create);
+  setImmediate(create);
   process.stdout.write('['+this.id+'].destroy()\r');
   this.destroy();
 }

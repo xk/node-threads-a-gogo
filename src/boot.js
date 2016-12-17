@@ -1,15 +1,19 @@
 //2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
 //threads_a_gogo boot.js
+//boot0 runs at module.init() which is at tagg= require('threads_a_gogo')
+//boot1 runs at t=tagg.create(), once in node's main thread and once in the thread just .create()d
 
-(function boot0 (version) {
+(function boot0 (version,global) {
 
 version= '0.18';
+global= (function () { return this })();
 
-if ((function () { return this })().process) {
+if (global.process) {
   process.versions.threads_a_gogo= version;
+  if (!global.setImmediate) global.setImmediate= function setImmediate (f) { process.nextTick(f) };
 }
 
-function boot (that,CHUNK,_on,_ntq) {
+function boot (that,CHUNK,_on,_ntq,global) {
 
   that= this;
   
@@ -67,18 +71,8 @@ function boot (that,CHUNK,_on,_ntq) {
     }
   }
   
-  if (!(function () { return this })().process) {
-    thread= that;
-    that.on= on;
-    that.once= once;
-    that._on= _on= {};
-    that._ntq= _ntq= [];
-    that.nextTick= nextTick;
-    that.removeAllListeners= removeAllListeners;
-    that.version= version;
-    return {dev:dispatchEvents, dnt:dispatchNextTicks};
-  }
-  else {
+  global= (function () { return this })();
+  if (global.process) {
     that.on= on;
     that.once= once;
     that._on= _on= {};
@@ -87,7 +81,17 @@ function boot (that,CHUNK,_on,_ntq) {
     that.version= version;
     return dispatchEvents;
   }
-  
+  else {
+    thread= that;
+    that.on= on;
+    that.once= once;
+    that._on= _on= {};
+    that._ntq= _ntq= [];
+    that.nextTick= global.setImmediate= nextTick;
+    that.removeAllListeners= removeAllListeners;
+    that.version= version;
+    return {dev:dispatchEvents, dnt:dispatchNextTicks};
+  }
 }
 
 return boot;

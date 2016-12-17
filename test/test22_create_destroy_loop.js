@@ -11,7 +11,7 @@ var k= 5;
     T.create().destroy();
   }
   i+= k;
-  process.nextTick(again);
+  setImmediate(again);
 })();
 
 

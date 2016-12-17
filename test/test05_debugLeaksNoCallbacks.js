@@ -20,7 +20,7 @@ i= 0;
     i++;
     v.eval('ƒ()');
   });
-  process.nextTick(loop); //segfaults
+  setImmediate(loop); //segfaults
 })();
 
 

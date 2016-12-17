@@ -9,7 +9,7 @@ function cb (err, msg) {
 }
 
 
-function ƒ () { process.nextTick(cb) }
+function ƒ () { setImmediate(cb) }
 
 var i= +process.argv[2] || 1;
 console.log('Using '+ i+ ' threads');
