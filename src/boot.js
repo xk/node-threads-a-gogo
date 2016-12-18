@@ -1,16 +1,18 @@
 //2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
 //threads_a_gogo boot.js
 //boot0 runs at module.init() which is at tagg= require('threads_a_gogo')
-//boot1 runs at t=tagg.create(), once in node's main thread and once in the thread just .create()d
+//boot1 runs twice at t=tagg.create(), first in node's main thread and again in the thread just .create()d
 
 (function boot0 (version,global) {
 
 version= '0.1.8';
-global= (function () { return this })();
 
+global= (function () { return this })();
 if (global.process) {
   process.versions.threads_a_gogo= version;
-  if (!global.setImmediate) global.setImmediate= function setImmediate (f) { process.nextTick(f) };
+  if (!global.setImmediate) {
+    global.setImmediate= function setImmediate (f) { process.nextTick(f) };
+  }
 }
 
 function boot (that,CHUNK,_on,_ntq,global) {
@@ -64,8 +66,9 @@ function boot (that,CHUNK,_on,_ntq,global) {
     var q= _on[evento];
     if (q) {
       if (q.once) {
-        q.once.forEach(function (v,i,o) { v.apply(that, argumentos) });
-        delete q.once;
+        while (q.once.length) {
+          q.once.shift().apply(that, argumentos);
+        }
       }
       q.forEach(function (v,i,o) { v.apply(that, argumentos) });
     }
