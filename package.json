@@ -31,7 +31,7 @@
   },
   "os": ["macos", "linux", "darwin"],
   "engines": {
-    "node": ">=0.5.1"
+    "node": ">=0.5.1 <0.11"
   },
   "dependencies": {
   	"bindings":"*"
