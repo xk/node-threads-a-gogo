@@ -4,12 +4,12 @@
   "main": "build/Release/threads_a_gogo.node",
   "description": "████ Simple and fast JavaScript threads for Node.js ████",
   "keywords": [
-    "The",
-    "most",
-    "awesome",
-    "project",
+    "a gogo",
     "ever",
-    "a gogo"
+    "project",
+    "awesome",
+    "most",
+    "The"
   ],
   "author": {
     "name":   "Jorge Chamorro Bieling",
