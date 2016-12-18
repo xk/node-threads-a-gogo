@@ -164,7 +164,7 @@ static Persistent<ObjectTemplate> threadTemplate;
 static typeQueue* qitemStore;
 
 #include "boot.js.c"
-#include "createPool.js.c"
+#include "pool.js.c"
 
 //Globals END
 
@@ -1058,7 +1058,7 @@ void Init (Handle<Object> target) {
   threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));
   
   target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
-  target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kCreatePool_js))->Run()->ToObject());
+  target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kPool_js))->Run()->ToObject());
 }
 
 NODE_MODULE(threads_a_gogo, Init)
