@@ -1034,7 +1034,7 @@ static Handle<Value> Create (const Arguments &args) {
 
 
 
-void Init (Handle<Object> target) {
+avoid Init (Handle<Object> target) {
   qitemStore= qitemStoreInit();
   useLocker= v8::Locker::IsActive();
   id_symbol= Persistent<String>::New(String::NewSymbol("id"));
