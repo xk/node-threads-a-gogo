@@ -1,6 +1,7 @@
 //2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
 //threads_a_gogo test/all.js
 //Quick basic module functionality test
+//*TODO* test events .emit .on y .once y pools y nextTicks y seImmediate y puts
 
 var assert = require('assert');
 
