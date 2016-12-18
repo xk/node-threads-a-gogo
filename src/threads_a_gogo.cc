@@ -12,7 +12,10 @@
 #include <string>
 #include <assert.h>
 
-static int DEBUG= 0;
+//using namespace node;
+using namespace v8;
+
+//Macros BEGIN
 
 #define kThreadMagicCookie 0x99c0ffee
 
@@ -27,8 +30,9 @@ static int DEBUG= 0;
   #define WAKEUP_EVENT_LOOP ev_async_send(EV_DEFAULT_UC_ &thread->async_watcher);
 #endif
 
-//using namespace node;
-using namespace v8;
+//Macros END
+
+//Type definitions BEGIN
 
 typedef enum jobTypes {
   kJobTypeEval,
@@ -112,45 +116,58 @@ typedef struct typeThread {
   unsigned long threadMagicCookie;
 } typeThread;
 
+//Type definitions END
 
-static inline void beep ();
-static inline void qPush (typeQueueItem* qitem, typeQueue* queue);
-static inline typeQueueItem* qPull (typeQueue* queue);
-static inline typeQueueItem* qUsed (typeQueue* queue);
-static inline typeQueueItem* nuQitem (typeQueue* queue);
-static typeQueue* nuQueue ();
-static void qitemStorePush (typeQueueItem* qitem);
-static typeQueueItem* qitemStorePull ();
-static typeQueue* qitemStoreInit ();
-static void destroyQueue (typeQueue* q);
-static typeThread* isAThread (Handle<Object> receiver);
-static void wakeUpThread (typeThread* thread);
-static Handle<Value> Puts (const Arguments &args);
-static void* threadBootProc (void* arg);
-static void eventLoop (typeThread* thread);
-static void cleanUpAfterThread (typeThread* thread);
+//Prototypes BEGIN
+
+static inline void beep (void);
+static inline void qPush (typeQueueItem*, typeQueue*);
+static inline typeQueueItem* qPull (typeQueue*);
+static inline typeQueueItem* qUsed (typeQueue*);
+static inline typeQueueItem* nuQitem (typeQueue*);
+static typeQueue* nuQueue (void);
+static void qitemStorePush (typeQueueItem*);
+static typeQueueItem* qitemStorePull (void);
+static typeQueue* qitemStoreInit (void);
+static void destroyQueue (typeQueue*);
+static typeThread* isAThread (Handle<Object>);
+static void wakeUpThread (typeThread*);
+static Handle<Value> Puts (const Arguments &);
+static void* threadBootProc (void*);
+static void eventLoop (typeThread*);
+static void cleanUpAfterThread (typeThread*);
 static void Callback (
 #ifdef TAGG_USE_LIBUV
-  uv_async_t *watcher
+  uv_async_t*
 #else
-  EV_P_ ev_async *watcher
+  EV_P_ ev_async*
 #endif
-                           , int status);
-static Handle<Value> Destroy (const Arguments &args);
-static Handle<Value> Eval (const Arguments &args);
-static Handle<Value> processEmit (const Arguments &args);
-static Handle<Value> threadEmit (const Arguments &args);
-static Handle<Value> Create (const Arguments &args);
-void Init (Handle<Object> target);
+                           , int);
+static Handle<Value> Destroy (const Arguments &);
+static Handle<Value> Eval (const Arguments &);
+static Handle<Value> processEmit (const Arguments &);
+static Handle<Value> threadEmit (const Arguments &);
+static Handle<Value> Create (const Arguments &);
+void Init (Handle<Object>);
+
+//Prototypes END
 
 
+//Globals BEGIN
 
+static int DEBUG= 0;
 static bool useLocker;
 static long int threadsCtr= 0;
 static Persistent<Object> boot_js;
 static Persistent<String> id_symbol;
 static Persistent<ObjectTemplate> threadTemplate;
 static typeQueue* qitemStore;
+
+#include "boot.js.c"
+#include "createPool.js.c"
+
+//Globals END
+
 /*
 
 cd deps/minifier/src
@@ -164,11 +181,6 @@ cat ../../../src/nextTick.js | ./minify kNextTick_js > ../../../src/kNextTick_js
 
 */
 
-#include "boot.js.c"
-//#include "load.js.c"
-//#include "events.js.c"
-//#include "nextTick.js.c"
-#include "createPool.js.c"
 
 
 
@@ -177,7 +189,7 @@ cat ../../../src/nextTick.js | ./minify kNextTick_js > ../../../src/kNextTick_js
 
 
 
-static inline void beep () {
+static inline void beep (void) {
   printf("\x07"), fflush (stdout);
 }
 
@@ -264,7 +276,7 @@ static inline typeQueueItem* nuQitem (typeQueue* queue) {
 
 
 //Sólo se debe usar en main/node's thread !
-static typeQueue* nuQueue () {
+static typeQueue* nuQueue (void) {
   DEBUG && printf("Q_NU_QUEUE\n");
   typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
   typeQueueItem* qitem= qitemStorePull();
@@ -306,7 +318,7 @@ static void qitemStorePush (typeQueueItem* qitem) {
 
 
 //Sólo se debe usar en main/node's thread !
-static typeQueueItem* qitemStorePull () {
+static typeQueueItem* qitemStorePull (void) {
   DEBUG && printf("Q_ITEM_STORE_PULL\n");
   typeQueueItem* qitem= NULL;
   assert(qitemStore->first != NULL);
@@ -326,7 +338,7 @@ static typeQueueItem* qitemStorePull () {
 
 
 //Sólo se debe usar en main/node's thread !
-static typeQueue* qitemStoreInit () {
+static typeQueue* qitemStoreInit (void) {
   DEBUG && printf("Q_ITEM_STORE_INIT\n");
   typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
   typeQueueItem* qitem= queue->first= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
@@ -370,6 +382,7 @@ static typeThread* isAThread (Handle<Object> receiver) {
   if (receiver->IsObject()) {
     if (receiver->InternalFieldCount() == 1) {
       thread= (typeThread*) receiver->GetPointerFromInternalField(0);
+      assert(thread != NULL);
       if (thread && (thread->threadMagicCookie == kThreadMagicCookie)) {
         return thread;
       }
@@ -676,9 +689,6 @@ static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
 static void cleanUpAfterThread (typeThread* thread) {
   
   DEBUG && printf("THREAD %ld cleanUpAfterThread() IN MAIN THREAD #1\n", thread->id);
-  
-  //(*TO_DO*): hay que vaciar las colas y destruir los trabajos y sus objetos antes de ponerlas a NULL
-  
   DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->processToThreadQueue)\n", thread->id);
   destroyQueue(thread->processToThreadQueue);
   DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->threadToProcessQueue)\n", thread->id);
@@ -726,9 +736,9 @@ static void cleanUpAfterThread (typeThread* thread) {
 // calling the thread's JS callback in node's js context in node's main thread.
 static void Callback (
 #ifdef TAGG_USE_LIBUV
-  uv_async_t *watcher
+  uv_async_t* watcher
 #else
-  EV_P_ ev_async *watcher
+  EV_P_ ev_async* watcher
 #endif
                            , int status) {
                            
@@ -830,12 +840,12 @@ static Handle<Value> Destroy (const Arguments &args) {
   //When done nicely the thread will quit only if/when there aren't anymore jobs pending
   //in its jobsQueue nor nextTick()ed functions to execute in the nextTick queue _ntq[]
   //When done rudely it will try to exit the event loop regardless.
-  //If the thread is stuck in a ` while (1) ; ` or something this won't work... (*TO_DO*)
+  //ToDo: If the thread is stuck in a ` while (1) ; ` or something this won't work...
   
   HandleScope scope;
   //TODO: Hay que comprobar que this en un objeto y que tiene hiddenRefTotypeThread_symbol y que no es nil
   //TODO: Aquí habría que usar static void TerminateExecution(int thread_id);
-  //TODO: static void v8::V8::TerminateExecution  ( Isolate *   isolate= NULL   )   [static]
+  //TODO: static void v8::V8::TerminateExecution  ( Isolate *   isolate= NULL   )
   
   typeThread* thread= isAThread(args.This());
   if (!thread) {
