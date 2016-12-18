@@ -1,4 +1,4 @@
-![travis](https://travis-ci.org/xk/node-threads-a-gogo.svg?branch=SYNC)
+[![build status](https://travis-ci.org/xk/node-threads-a-gogo.svg?branch=SYNC)](https://travis-ci.org/xk/node-threads-a-gogo)
 [![npm version](https://badge.fury.io/js/threads_a_gogo.svg)](https://www.npmjs.com/package/threads_a_gogo)
 # TAGG: Threads à gogo for Node.js
 
