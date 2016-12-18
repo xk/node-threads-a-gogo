@@ -7,7 +7,7 @@ var assert = require('assert');
 
 var tagg= require('threads_a_gogo');
 process.stdout.write('0.OK.');
-assert.equal(process.versions.threads_a_gogo, '0.1.8');
+assert.equal(typeof process.versions.threads_a_gogo, 'string');
 process.stdout.write('1.OK.');
 assert.equal(typeof tagg.create, 'function');
 process.stdout.write('2.OK.');
@@ -47,5 +47,7 @@ function cb (a,b) {
 
 function cb2 () {
   process.stdout.write('19.OK.END\n');
-  process.stdout.write('THREADS_A_GOGO BASIC FUNCTIONALITY TEST: OK, IT WORKS!\n');
+  process.stdout.write('THREADS_A_GOGO v'
+               + process.versions.threads_a_gogo
+               + ' BASIC FUNCTIONALITY TEST: OK, IT WORKS!\n');
 }
