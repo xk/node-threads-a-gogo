@@ -2,6 +2,7 @@
 //threads_a_gogo.cc
 
 #include <v8.h>
+#include <uv.h>
 #include <node.h>
 #include <node_version.h>
 #include <unistd.h>
