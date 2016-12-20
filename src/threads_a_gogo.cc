@@ -22,7 +22,7 @@ using namespace v8;
 
 #define TAGG_USE_LIBUV
 #if (NODE_MAJOR_VERSION == 0) && (NODE_MINOR_VERSION <= 5)
-#undef TAGG_USE_LIBUV
+  #undef TAGG_USE_LIBUV
 #endif
 
 #ifdef TAGG_USE_LIBUV
