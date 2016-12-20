@@ -1053,7 +1053,6 @@ void Init (Handle<Object> target) {
   
   threadTemplate= Persistent<ObjectTemplate>::New(ObjectTemplate::New());
   threadTemplate->SetInternalFieldCount(1);
-  threadTemplate->Set(id_symbol, Integer::New(0));
   threadTemplate->Set(String::NewSymbol("eval"), FunctionTemplate::New(Eval));
   threadTemplate->Set(String::NewSymbol("emit"), FunctionTemplate::New(processEmit));
   threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));
