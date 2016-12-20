@@ -8,7 +8,7 @@
                        "inputs": [ "src/threads_a_gogo.cc" ],
                        "outputs": [ "src/threads_a_gogo.cc" ],
                        "action": ["bash", "-c", "cd <(module_root_dir)/src && node js2c.js"],
-                       "message": "*** THREADS_A_GOGO: RUN JSTOC" } ]
+                       "message": "*** THREADS_A_GOGO: RUN JS2C" } ]
 	},
 	{
         "target_name": "threads_a_gogo",

@@ -27,7 +27,7 @@ def build(bld):
   print '****************** BUILD *******************'
   print '********************************************'
   print '*** Minifying & C-ifying boot.js and pool.js'
-  subprocess.check_call(["bash", "-c", "cd src && node jstoc.js")])
+  subprocess.check_call(["bash", "-c", "cd src && node js2c.js")])
   
   print '*** Building'
   obj = bld.new_task_gen("cxx", "shlib", "node_addon")
