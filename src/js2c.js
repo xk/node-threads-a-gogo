@@ -316,6 +316,7 @@ function jstoc (file,cVarName,fs,txt) {
            + "\";\n";
 
     fs.writeFileSync(file+ ".c", txt, "utf8");
+    console.log("*** THREADS_A_GOGO: JS2C("+ cVarName+ "): OK");
 }
 
 
