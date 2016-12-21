@@ -57,15 +57,17 @@ function boot (that,CHUNK,_on,_ntq,global) {
     return that;
   }
   
-  function dispatchEvents (evento, argumentos) {
-    var q= _on[evento];
+  function dispatchEvents (event,argumentos,i) {
+    var q= _on[event];
     if (q) {
       if (q.once) {
         while (q.once.length) {
           q.once.shift().apply(that, argumentos);
         }
       }
-      q.forEach(function (v,i,o) { v.apply(that, argumentos) });
+      for ( i=0 ; i<q.length ; i++ ) {
+        q[i].apply(that, argumentos);
+      }
     }
   }
     
