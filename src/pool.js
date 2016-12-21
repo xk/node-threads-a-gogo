@@ -1,13 +1,8 @@
-(function createPool (n,o,pool,tagg) {
+(function createPool (n,o,pool,tagg,jobsCtr) {
   'use strict';
   
-  //2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
-  //threads_a_gogo createPool.js
-  /*
-  
-  ******          ALL THIS IS STILL BROKEN
-  
-  */
+  //2011-11, 2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
+  //threads_a_gogo pool.js
   
 
   function load (path, cb) {
@@ -16,21 +11,38 @@
   }
 
 
-  function evalAny (src, cb) {
-    pool[rnd(pool.length)].eval(src, cb);
-    return o;
+  function wrap (cb, that) {
+    that= this;
+    return function (err, result) {
+      jobsCtr-= 1;
+      if (cb) cb.call(that, err, result);
+    }
   }
 
 
+  function evalAny (src, cb) {
+/*
+    TODO esto no es lo que debe ser, no es cuestión de elegir al buen tuntún
+*/
+    jobsCtr+= 1;
+    pool[rnd(pool.length)].eval(src, wrap(cb));
+    return o;
+  }
+  
+  
   function evalAll (src, cb) {
     pool.forEach(function (v,i,o) {
-      v.eval(src, cb);
+      jobsCtr+= 1;
+      v.eval(src, wrap(cb));
     });
     return o;
   }
 
 
   function emitAny (t, args) {
+/*
+    TODO esto no es lo que debe ser, no es cuestión de elegir al buen tuntún
+*/
     args= Array.prototype.splice.call(arguments,0);
     t= pool[rnd(pool.length)];
     t.emit.apply(t, args);
@@ -74,11 +86,19 @@
   }
   
   tagg= this;
-  
+  jobsCtr= 0;
   pool= [];
   o= {  any: { eval:evalAny, emit:emitAny },
         all: { eval:evalAll, emit:emitAll },
         on:on,
+        totalThreads: function getTotalThreads () { return pool.length },
+        idleThreads: function getIdleThreads () {
+/*
+    TODO esto no es lo que debe ser, espabilao!
+*/
+          return pool.length
+        },
+        pendingJobs: function getPendingJobs () { return jobsCtr },
         load:load,
         destroy:destroy };
 
