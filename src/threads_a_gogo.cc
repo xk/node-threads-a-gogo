@@ -535,7 +535,50 @@ static void eventLoop (typeThread* thread) {
             event= qitem;
             qitem= NULL;
             DEBUG && printf("THREAD %ld QITEM\n", thread->id);
-            if (event->eventType == eventTypeEval) {
+            if (event->eventType == eventTypeLoad) {
+              HandleScope scope;
+              
+              Local<Script> script;
+              Local<Value> resultado;
+              
+              DEBUG && printf("THREAD %ld QITEM LOAD\n", thread->id);
+              
+              char* buf= NULL;
+              FILE* fp= fopen(**(event->load.path), "rb");
+              if (fp) {
+                fseek(fp, 0, SEEK_END);
+                long len= ftell(fp);
+                rewind(fp); //fseek(fp, 0, SEEK_SET);
+                buf= (char*) calloc(len + 1, sizeof(char)); // +1 to get null terminated string
+                fread(buf, len, 1, fp);
+                fclose(fp);
+              }
+              delete event->load.path;
+              if (buf != NULL) {
+                script= Script::Compile(String::New(buf));
+                free(buf);
+                if (!onError.HasCaught()) resultado= script->Run();
+                event->load.error= onError.HasCaught() ? 1 : 0;
+              }
+              else {
+                event->load.error= 2;
+              }
+              
+              if (event->load.hasCallback) {
+                qitem3= nuQitem(thread->processEventsQueue);
+                memcpy(qitem3, event, sizeof(eventsQueueItem));
+                qitem3->eventType= eventTypeEval;
+                qitem3->eval.error= event->load.error;
+                qitem3->eval.resultado= new String::Utf8Value(qitem3->eval.error ? onError.Exception() : resultado);
+                qPush(qitem3, thread->processEventsQueue);
+                WAKEUP_NODES_EVENT_LOOP
+              }
+              
+              if (onError.HasCaught()) onError.Reset();
+              
+              event->eventType= eventTypeNone;
+            }
+            else if (event->eventType == eventTypeEval) {
               HandleScope scope;
               
               Local<Script> script;
@@ -547,8 +590,8 @@ static void eventLoop (typeThread* thread) {
               
               str= event->eval.scriptText;
               source= String::New(**str, (*str).length());
-              delete str;
               script= Script::New(source);
+              delete str;
             
               if (!onError.HasCaught()) resultado= script->Run();
 
@@ -908,7 +951,7 @@ static Handle<Value> Eval (const Arguments &args) {
 
 
 
-// Load: Loads from file and passes to Eval
+// Load: emits a eventTypeLoad event to the thread
 static Handle<Value> Load (const Arguments &args) {
   HandleScope scope;
 

@@ -38,7 +38,7 @@ var name= rndStr(12)+ '.tagg.test.js';
 var path= (process.env.TMPDIR || '/tmp/')+ name;
 require('fs').writeFileSync(path, boot);
 
-var t= tagg.create()/*.load(path, cb)*/.eval("("+ boot+ ")()", cb1);
+var t= tagg.create().load(path, cb).eval("boot()", cb1);
 step('OK.');
 assert.equal(typeof t.id, 'number');
 step('OK.');
