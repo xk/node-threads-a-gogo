@@ -192,9 +192,9 @@ cat ../../../src/nextTick.js | ./minify kNextTick_js > ../../../src/kNextTick_js
 
 
 
-
+//jejeje
 static inline void beep (void) {
-  printf("\x07"), fflush (stdout);
+  printf("\a"), fflush (stdout);  // que es lo mismo que \x07
 }
 
 
@@ -203,7 +203,7 @@ static inline void beep (void) {
 
 
 
-
+//Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
   DEBUG && printf("Q_PUSH\n");
   qitem->next= NULL;
@@ -219,7 +219,7 @@ static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
 
 
 
-
+//Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline eventsQueueItem* qPull (eventsQueue* queue) {
   DEBUG && printf("Q_PULL\n");
   eventsQueueItem* qitem= queue->pullPtr;
@@ -237,7 +237,7 @@ static inline eventsQueueItem* qPull (eventsQueue* queue) {
 
 
 
-
+//Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline eventsQueueItem* qUsed (eventsQueue* queue) {
   DEBUG && printf("Q_USED\n");
   eventsQueueItem* qitem= NULL;
@@ -258,7 +258,7 @@ static inline eventsQueueItem* qUsed (eventsQueue* queue) {
 
 
 
-
+//Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline eventsQueueItem* nuQitem (eventsQueue* queue) {
   DEBUG && printf("Q_NU_Q_ITEM\n");
   eventsQueueItem* qitem= NULL;
@@ -359,7 +359,7 @@ static eventsQueue* qitemStoreInit (void) {
 
 
 
-
+//Sólo se debe usar en main/node's thread !
 static void destroyQueue (eventsQueue* queue) {
   DEBUG && printf("Q_DESTROY_QUEUE\n");
   eventsQueueItem* qitem;
@@ -378,7 +378,7 @@ static void destroyQueue (eventsQueue* queue) {
 
 
 
-
+//Llamar a un método de la thread con el 'this' (receiver) mal puesto es bombazo seguro, por eso esto.
 static typeThread* isAThread (Handle<Object> receiver) {
   typeThread* thread;
   if (receiver->IsObject()) {
@@ -399,7 +399,7 @@ static typeThread* isAThread (Handle<Object> receiver) {
 
 
 
-
+//Se encarga de poner en marcha la thread si es que estaba durmiendo
 static void wakeUpThread (typeThread* thread) {
 
 //Esto se ejecuta siempre en node's main thread
@@ -429,7 +429,7 @@ static void wakeUpThread (typeThread* thread) {
 
 
 
-
+//printf de andar por casa
 static Handle<Value> Puts (const Arguments &args) {
   int i= 0;
   while (i < args.Length()) {
@@ -449,10 +449,9 @@ static Handle<Value> Puts (const Arguments &args) {
 
 
 
-static void* threadBootProc (void* arg) {
-
 //Esto es lo primero que se ejecuta en la(s) thread(s) al nacer.
 //Básicamente inicializa lo necesario y se entra en el eventloop
+static void* threadBootProc (void* arg) {
 
   int dummy;
   pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, &dummy);
@@ -502,7 +501,6 @@ static void eventLoop (typeThread* thread) {
   thread->context= Context::New();
   thread->context->Enter();
   
-
   HandleScope scope1;
   Local<Object> global= thread->context->Global();
   global->Set(String::New("puts"), FunctionTemplate::New(Puts)->GetFunction());
@@ -702,12 +700,22 @@ static void eventLoop (typeThread* thread) {
 
 
 
+
+
+
+//Cuando una thread se echa a dormir esto lo debe notificar a node. OJO TODO
 static void notifyIdle (typeThread* thread) {
   printf("*** notifyIdle()\n");
 }
 
 
 
+
+
+
+
+
+//Esto es por culpa de libuv que se empeña en tener un callback de terminación. Al parecer...
 static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
   HandleScope scope;
   typeThread* thread= (typeThread*) arg;
@@ -725,6 +733,7 @@ static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
 
 
 
+//Deshacerse de todo, lo que se pueda guardar se guarda para reutilizarlo
 static void cleanUpAfterThread (typeThread* thread) {
   
   DEBUG && printf("THREAD %ld cleanUpAfterThread() IN MAIN THREAD #1\n", thread->id);
@@ -982,7 +991,8 @@ static Handle<Value> Load (const Arguments &args) {
 
 
 
-
+//No se usa xq parece que el inline no va, pero sirve para acortar processEmit y threadEmit,
+//por que casi todo el código es idéntico en ambas
 static inline void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
   eventsQueueItem* event= nuQitem(queue);
   event->eventType= eventTypeEmit;
@@ -1005,14 +1015,26 @@ static inline void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
 
 
 
-
+//La que emite los events de node hacia las threads
 static Handle<Value> processEmit (const Arguments &args) {
   if (!args.Length()) return args.This();
   typeThread* thread= isAThread(args.This());
   if (!thread) {
     return ThrowException(Exception::TypeError(String::New("thread.emit(): 'this' must be a thread object")));
   }
-  pushEmitEvent(thread->threadEventsQueue, args);
+  eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
+  event->eventType= eventTypeEmit;
+  event->emit.eventName= new String::Utf8Value(args[0]);
+  event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
+  if (event->emit.argc) {
+    event->emit.argc= args.Length()- 1;
+    event->emit.argv= (String::Utf8Value**) malloc(event->emit.argc * sizeof(void*));
+    int i= 0;
+    do {
+      event->emit.argv[i]= new String::Utf8Value(args[i+1]);
+    } while (++i < event->emit.argc);
+  }
+  qPush(event, thread->threadEventsQueue);
   wakeUpThread(thread);
   return args.This();
 }
@@ -1023,11 +1045,23 @@ static Handle<Value> processEmit (const Arguments &args) {
 
 
 
-
+//La que emite los events de las threads hacia node
 static Handle<Value> threadEmit (const Arguments &args) {
   if (!args.Length()) return args.This();
   typeThread* thread= (typeThread*) Isolate::GetCurrent()->GetData();
-  pushEmitEvent(thread->processEventsQueue, args);
+  eventsQueueItem* event= nuQitem(thread->processEventsQueue);
+  event->eventType= eventTypeEmit;
+  event->emit.eventName= new String::Utf8Value(args[0]);
+  event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
+  if (event->emit.argc) {
+    event->emit.argc= args.Length()- 1;
+    event->emit.argv= (String::Utf8Value**) malloc(event->emit.argc * sizeof(void*));
+    int i= 0;
+    do {
+      event->emit.argv[i]= new String::Utf8Value(args[i+1]);
+    } while (++i < event->emit.argc);
+  }
+  qPush(event, thread->processEventsQueue);
   WAKEUP_NODES_EVENT_LOOP
   return args.This();
 }
@@ -1039,7 +1073,7 @@ static Handle<Value> threadEmit (const Arguments &args) {
 
 
 
-// Creates and launches a new isolate in a new background thread.
+//Se ejecuta al hacer tagg.create(): Creates and launches a new isolate in a new background thread.
 static Handle<Value> Create (const Arguments &args) {
     HandleScope scope;
     
@@ -1095,7 +1129,7 @@ static Handle<Value> Create (const Arguments &args) {
 
 
 
-
+//Esto es lo primero que llama node al hacer require('threads_a_gogo')
 void Init (Handle<Object> target) {
   qitemStore= qitemStoreInit();
   useLocker= v8::Locker::IsActive();
