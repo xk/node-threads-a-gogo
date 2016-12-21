@@ -26,61 +26,50 @@ using namespace v8;
 #endif
 
 #ifdef TAGG_USE_LIBUV
-  #define WAKEUP_EVENT_LOOP uv_async_send(&thread->async_watcher);
+  #define WAKEUP_NODES_EVENT_LOOP uv_async_send(&thread->async_watcher);
 #else
-  #define WAKEUP_EVENT_LOOP ev_async_send(EV_DEFAULT_UC_ &thread->async_watcher);
+  #define WAKEUP_NODES_EVENT_LOOP ev_async_send(EV_DEFAULT_UC_ &thread->async_watcher);
 #endif
 
 //Macros END
 
 //Type definitions BEGIN
 
-typedef enum jobTypes {
-  kJobTypeEval,
-  kJobTypeEvent,
-  kJobTypeNone
-} jobTypes;
+typedef enum eventTypes {
+  eventTypeNone = 0,
+  eventTypeEmit,
+  eventTypeEval
+} eventTypes;
 
-typedef struct typeEvent {
-  int length;
+struct emitStruct {
+  int argc;
+  String::Utf8Value** argv;
   String::Utf8Value* eventName;
-  String::Utf8Value** argumentos;
-} typeEvent;
+};
 
-typedef struct typeEval {
+struct evalStruct {
   int error;
-  int tiene_callBack;
-  int useStringObject;
+  int hasCallback;
+  Persistent<Object> callback;
   String::Utf8Value* resultado;
-  union {
-    char* scriptText_CharPtr;
-    String::Utf8Value* scriptText_StringObject;
-  };
-} typeEval;
-     
-typedef struct typeJob {
-  int done;
-  int jobType;
-  Persistent<Object> cb;
-  union {
-    typeEval eval;
-    typeEvent event;
-  };
-} typeJob;
+  String::Utf8Value* scriptText;
+};
 
-typedef struct typeQueueItem {
-  typeQueueItem* next;
-  typeJob job;
-} typeQueueItem;
+struct eventsQueueItem {
+  eventsQueueItem* next;
+  int eventType;
+  emitStruct emit;
+  evalStruct eval;
+};
 
-typedef struct typeQueue {
-  typeQueueItem* first;
-  typeQueueItem* pullPtr;
+typedef struct eventsQueue {
+  eventsQueueItem* first;
+  eventsQueueItem* pullPtr;
   union {
-    typeQueueItem* pushPtr;
-    typeQueueItem* last;
+    eventsQueueItem* pushPtr;
+    eventsQueueItem* last;
   };
-} typeQueue;
+} eventsQueue;
 
 typedef enum killTypes {
   kKillNicely= 1,
@@ -97,24 +86,25 @@ typedef struct typeThread {
   
   long int id;
   pthread_t thread;
+  volatile int IDLE;
   volatile int ended;
   volatile int sigkill;
+  int hasDestroyCallback;
+  int hasIdleEventsListener;
+  unsigned long threadMagicCookie;
   
-  typeQueue* processToThreadQueue;  //Jobs to run in the thread
-  typeQueue* threadToProcessQueue;  //Jobs to run in node's main thread
+  eventsQueue* threadEventsQueue;   //Jobs to run in the thread
+  eventsQueue* processEventsQueue;  //Jobs to run in node's main thread
   
-  volatile int IDLE;
   pthread_cond_t idle_cv;
   pthread_mutex_t idle_mutex;
   
   Isolate* isolate;
   Persistent<Context> context;
-  Persistent<Object> nodeJSObject;
+  Persistent<Object> nodeObject;
   Persistent<Object> nodeDispatchEvents;
-  int hasDestroyCallback;
   Persistent<Object> destroyCallback;
   
-  unsigned long threadMagicCookie;
 } typeThread;
 
 //Type definitions END
@@ -122,20 +112,21 @@ typedef struct typeThread {
 //Prototypes BEGIN
 
 static inline void beep (void);
-static inline void qPush (typeQueueItem*, typeQueue*);
-static inline typeQueueItem* qPull (typeQueue*);
-static inline typeQueueItem* qUsed (typeQueue*);
-static inline typeQueueItem* nuQitem (typeQueue*);
-static typeQueue* nuQueue (void);
-static void qitemStorePush (typeQueueItem*);
-static typeQueueItem* qitemStorePull (void);
-static typeQueue* qitemStoreInit (void);
-static void destroyQueue (typeQueue*);
+static inline void qPush (eventsQueueItem*, eventsQueue*);
+static inline eventsQueueItem* qPull (eventsQueue*);
+static inline eventsQueueItem* qUsed (eventsQueue*);
+static inline eventsQueueItem* nuQitem (eventsQueue*);
+static eventsQueue* nuQueue (void);
+static void qitemStorePush (eventsQueueItem*);
+static eventsQueueItem* qitemStorePull (void);
+static eventsQueue* qitemStoreInit (void);
+static void destroyQueue (eventsQueue*);
 static typeThread* isAThread (Handle<Object>);
 static void wakeUpThread (typeThread*);
 static Handle<Value> Puts (const Arguments &);
 static void* threadBootProc (void*);
 static void eventLoop (typeThread*);
+static void notifyIdle (typeThread*);
 static void cleanUpAfterThread (typeThread*);
 static void Callback (
 #ifdef TAGG_USE_LIBUV
@@ -162,7 +153,7 @@ static long int threadsCtr= 0;
 static Persistent<Object> boot_js;
 static Persistent<String> id_symbol;
 static Persistent<ObjectTemplate> threadTemplate;
-static typeQueue* qitemStore;
+static eventsQueue* qitemStore;
 
 #include "boot.js.c"
 #include "pool.js.c"
@@ -201,7 +192,7 @@ static inline void beep (void) {
 
 
 
-static inline void qPush (typeQueueItem* qitem, typeQueue* queue) {
+static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
   DEBUG && printf("Q_PUSH\n");
   qitem->next= NULL;
   assert(queue->pushPtr != NULL);
@@ -217,15 +208,15 @@ static inline void qPush (typeQueueItem* qitem, typeQueue* queue) {
 
 
 
-static inline typeQueueItem* qPull (typeQueue* queue) {
+static inline eventsQueueItem* qPull (eventsQueue* queue) {
   DEBUG && printf("Q_PULL\n");
-  typeQueueItem* qitem= queue->pullPtr;
+  eventsQueueItem* qitem= queue->pullPtr;
   assert(queue->pullPtr != NULL);
-  while (qitem->job.done && qitem->next) {
+  while (!qitem->eventType && qitem->next) {
     queue->pullPtr= qitem->next;
     qitem= queue->pullPtr;
   }
-  return qitem->job.done ? NULL : qitem;
+  return !qitem->eventType ? NULL : qitem;
 }
 
 
@@ -235,9 +226,9 @@ static inline typeQueueItem* qPull (typeQueue* queue) {
 
 
 
-static inline typeQueueItem* qUsed (typeQueue* queue) {
+static inline eventsQueueItem* qUsed (eventsQueue* queue) {
   DEBUG && printf("Q_USED\n");
-  typeQueueItem* qitem= NULL;
+  eventsQueueItem* qitem= NULL;
   assert(queue->first != NULL);
   assert(queue->pullPtr != NULL);
   if (queue->first != queue->pullPtr) {
@@ -256,16 +247,15 @@ static inline typeQueueItem* qUsed (typeQueue* queue) {
 
 
 
-static inline typeQueueItem* nuQitem (typeQueue* queue) {
+static inline eventsQueueItem* nuQitem (eventsQueue* queue) {
   DEBUG && printf("Q_NU_Q_ITEM\n");
-  typeQueueItem* qitem= NULL;
+  eventsQueueItem* qitem= NULL;
   if (queue) qitem= qUsed(queue);
   if (!qitem) {
-    qitem= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+    qitem= (eventsQueueItem*) calloc(1, sizeof(eventsQueueItem));
     beep();
   }
-  qitem->job.jobType= kJobTypeNone;
-  qitem->job.done= 0;
+  qitem->eventType= eventTypeNone;
   qitem->next= NULL;
   return qitem;
 }
@@ -277,19 +267,18 @@ static inline typeQueueItem* nuQitem (typeQueue* queue) {
 
 
 //Sólo se debe usar en main/node's thread !
-static typeQueue* nuQueue (void) {
+static eventsQueue* nuQueue (void) {
   DEBUG && printf("Q_NU_QUEUE\n");
-  typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
-  typeQueueItem* qitem= qitemStorePull();
+  eventsQueue* queue= (eventsQueue*) calloc(1, sizeof(eventsQueue));
+  eventsQueueItem* qitem= qitemStorePull();
   if (!qitem) qitem= nuQitem(NULL);
   queue->first= qitem;
-  qitem->job.done= 1;
+  qitem->eventType= eventTypeNone;
   int i= 96;
   while (--i) {
     qitem->next= qitemStorePull();
     if (!qitem->next) qitem->next= nuQitem(NULL);
-    qitem= qitem->next;
-    qitem->job.done= 1;
+    (qitem= qitem->next)->eventType= eventTypeNone;
   }
   qitem->next= NULL;
   queue->pullPtr= queue->pushPtr= qitem;
@@ -303,7 +292,7 @@ static typeQueue* nuQueue (void) {
 
 
 //Sólo se debe usar en main/node's thread !
-static void qitemStorePush (typeQueueItem* qitem) {
+static void qitemStorePush (eventsQueueItem* qitem) {
   DEBUG && printf("Q_ITEM_STORE_PUSH\n");
   qitem->next= NULL;
   assert(qitemStore->last != NULL);
@@ -319,9 +308,9 @@ static void qitemStorePush (typeQueueItem* qitem) {
 
 
 //Sólo se debe usar en main/node's thread !
-static typeQueueItem* qitemStorePull (void) {
+static eventsQueueItem* qitemStorePull (void) {
   DEBUG && printf("Q_ITEM_STORE_PULL\n");
-  typeQueueItem* qitem= NULL;
+  eventsQueueItem* qitem= NULL;
   assert(qitemStore->first != NULL);
   assert(qitemStore->last != NULL);
   if (qitemStore->first != qitemStore->last) {
@@ -339,13 +328,13 @@ static typeQueueItem* qitemStorePull (void) {
 
 
 //Sólo se debe usar en main/node's thread !
-static typeQueue* qitemStoreInit (void) {
+static eventsQueue* qitemStoreInit (void) {
   DEBUG && printf("Q_ITEM_STORE_INIT\n");
-  typeQueue* queue= (typeQueue*) calloc(1, sizeof(typeQueue));
-  typeQueueItem* qitem= queue->first= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+  eventsQueue* queue= (eventsQueue*) calloc(1, sizeof(eventsQueue));
+  eventsQueueItem* qitem= queue->first= (eventsQueueItem*) calloc(1, sizeof(eventsQueueItem));
   int i= 2048;
   while (i--) {
-    qitem->next= (typeQueueItem*) calloc(1, sizeof(typeQueueItem));
+    qitem->next= (eventsQueueItem*) calloc(1, sizeof(eventsQueueItem));
     qitem= qitem->next;
   }
   queue->last= qitem;
@@ -359,9 +348,9 @@ static typeQueue* qitemStoreInit (void) {
 
 
 
-static void destroyQueue (typeQueue* queue) {
+static void destroyQueue (eventsQueue* queue) {
   DEBUG && printf("Q_DESTROY_QUEUE\n");
-  typeQueueItem* qitem;
+  eventsQueueItem* qitem;
   assert(queue->first != NULL);
   while (queue->first) {
     qitem= queue->first;
@@ -480,8 +469,8 @@ static void* threadBootProc (void* arg) {
   thread->isolate->Dispose();
   DEBUG && printf("THREAD %ld BOOT EXIT #3\n", thread->id);
   thread->ended= 1;
-  DEBUG && printf("THREAD %ld BOOT EXIT #4 WAKEUP_EVENT_LOOP\n", thread->id);
-  WAKEUP_EVENT_LOOP
+  DEBUG && printf("THREAD %ld BOOT EXIT #4 WAKEUP_NODES_EVENT_LOOP\n", thread->id);
+  WAKEUP_NODES_EVENT_LOOP
   DEBUG && printf("THREAD %ld BOOT EXIT #5 ENDED\n", thread->id);
   return 0;
 }
@@ -518,9 +507,8 @@ static void eventLoop (typeThread* thread) {
   while (1) {
   
       double ntql;
-      typeJob* job;
-      typeQueueItem *qitem= NULL;
-      typeQueueItem *qitem2, *qitem3;
+      eventsQueueItem *qitem= NULL;
+      eventsQueueItem *event, *qitem3;
       TryCatch onError;
         
       DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
@@ -530,13 +518,12 @@ static void eventLoop (typeThread* thread) {
           DEBUG && printf("THREAD %ld WHILE\n", thread->id);
           
           if (thread->sigkill == kKillRudely) break;
-          else if (qitem || (qitem= qPull(thread->processToThreadQueue))) {
+          else if (qitem || (qitem= qPull(thread->threadEventsQueue))) {
           
-            qitem2= qitem;
+            event= qitem;
             qitem= NULL;
             DEBUG && printf("THREAD %ld QITEM\n", thread->id);
-            job= &qitem2->job;
-            if (job->jobType == kJobTypeEval) {
+            if (event->eventType == eventTypeEval) {
               HandleScope scope;
               
               Local<Script> script;
@@ -546,34 +533,27 @@ static void eventLoop (typeThread* thread) {
               
               DEBUG && printf("THREAD %ld QITEM EVAL\n", thread->id);
               
-              if (job->eval.useStringObject) {
-                str= job->eval.scriptText_StringObject;
-                source= String::New(**str, (*str).length());
-                delete str;
-              }
-              else {
-                source= String::New(job->eval.scriptText_CharPtr);
-                free(job->eval.scriptText_CharPtr);
-              }
-            
+              str= event->eval.scriptText;
+              source= String::New(**str, (*str).length());
+              delete str;
               script= Script::New(source);
             
               if (!onError.HasCaught()) resultado= script->Run();
 
-              if (job->eval.tiene_callBack) {
-                qitem3= nuQitem(thread->threadToProcessQueue);
-                memcpy(qitem3, qitem2, sizeof(typeQueueItem));
-                qitem3->job.eval.error= onError.HasCaught() ? 1 : 0;
-                qitem3->job.eval.resultado= new String::Utf8Value(job->eval.error ? onError.Exception() : resultado);
-                qPush(qitem3, thread->threadToProcessQueue);
-                WAKEUP_EVENT_LOOP
+              if (event->eval.hasCallback) {
+                qitem3= nuQitem(thread->processEventsQueue);
+                memcpy(qitem3, event, sizeof(eventsQueueItem));
+                qitem3->eval.error= onError.HasCaught() ? 1 : 0;
+                qitem3->eval.resultado= new String::Utf8Value(qitem3->eval.error ? onError.Exception() : resultado);
+                qPush(qitem3, thread->processEventsQueue);
+                WAKEUP_NODES_EVENT_LOOP
               }
               
               if (onError.HasCaught()) onError.Reset();
               
-              job->done= 1;
+              event->eventType= eventTypeNone;
             }
-            else if (job->jobType == kJobTypeEvent) {
+            else if (event->eventType == eventTypeEmit) {
               HandleScope scope;
             
               Local<Value> args[2];
@@ -581,24 +561,24 @@ static void eventLoop (typeThread* thread) {
               
               DEBUG && printf("THREAD %ld QITEM EVENT\n", thread->id);
               
-              str= job->event.eventName;
+              str= event->emit.eventName;
               args[0]= String::New(**str, (*str).length());
               delete str;
             
-              Local<Array> array= Array::New(job->event.length);
+              Local<Array> array= Array::New(event->emit.argc);
               args[1]= array;
             
               int i= 0;
-              while (i < job->event.length) {
-                str= job->event.argumentos[i];
+              while (i < event->emit.argc) {
+                str= event->emit.argv[i];
                 array->Set(i, String::New(**str, (*str).length()));
                 delete str;
                 i++;
               }
             
-              free(job->event.argumentos);
+              free(event->emit.argv);
               dev->CallAsFunction(global, 2, args);
-              job->done= 1;
+              event->eventType= eventTypeNone;
             }
             else {
               assert(1);
@@ -616,7 +596,7 @@ static void eventLoop (typeThread* thread) {
           }
           
           if (thread->sigkill == kKillRudely) break;
-          else if (!ntql && !(qitem || (qitem= qPull(thread->processToThreadQueue)))) {
+          else if (!ntql && !(qitem || (qitem= qPull(thread->threadEventsQueue)))) {
             DEBUG && printf("THREAD %ld EXIT WHILE: NO NTQL AND NO QITEM\n", thread->id);
             break;
           }
@@ -634,13 +614,14 @@ static void eventLoop (typeThread* thread) {
       //y por otro lado para poder tocar thread->IDLE sabiendo
       //que nadie la está mirando mientras la tocamos.
       pthread_mutex_lock(&thread->idle_mutex);
-      DEBUG && printf("THREAD %ld TIENE processToThreadQueue_MUTEX\n", thread->id);
-      //aquí tenemos acceso exclusivo a processToThreadQueue y a thread->IDLE
-      while (!(qitem || (qitem= qPull(thread->processToThreadQueue))) && !thread->sigkill) {
+      DEBUG && printf("THREAD %ld TIENE threadEventsQueue_MUTEX\n", thread->id);
+      //aquí tenemos acceso exclusivo a threadEventsQueue y a thread->IDLE
+      while (!(qitem || (qitem= qPull(thread->threadEventsQueue))) && !thread->sigkill) {
         //sólo se entra aquí si no hay nada en la queue y no hay sigkill
         //hemos avisado con thread->IDLE de que nos quedamos parados
         // para que sepan que nos han de despertar
         thread->IDLE= 1;
+        if (thread->hasIdleEventsListener) notifyIdle(thread);
         DEBUG && printf("THREAD %ld SLEEP\n", thread->id);
         //en pthread_cond_wait se quedará atascada esta thread hasta que
         //nos despierten y haya cosas en la queue o haya sigkill
@@ -655,7 +636,7 @@ static void eventLoop (typeThread* thread) {
       DEBUG && printf("THREAD %ld WAKE UP\n", thread->id);
       //lo soltamos
       pthread_mutex_unlock(&thread->idle_mutex);
-      DEBUG && printf("THREAD %ld SUELTA processToThreadQueue_mutex\n", thread->id);
+      DEBUG && printf("THREAD %ld SUELTA threadEventsQueue_mutex\n", thread->id);
       
     }
 
@@ -666,7 +647,9 @@ static void eventLoop (typeThread* thread) {
 
 
 
-
+static void notifyIdle (typeThread* thread) {
+  printf("*** notifyIdle()\n");
+}
 
 
 
@@ -690,15 +673,15 @@ static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
 static void cleanUpAfterThread (typeThread* thread) {
   
   DEBUG && printf("THREAD %ld cleanUpAfterThread() IN MAIN THREAD #1\n", thread->id);
-  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->processToThreadQueue)\n", thread->id);
-  destroyQueue(thread->processToThreadQueue);
-  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->threadToProcessQueue)\n", thread->id);
-  destroyQueue(thread->threadToProcessQueue);
+  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->threadEventsQueue)\n", thread->id);
+  destroyQueue(thread->threadEventsQueue);
+  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->processEventsQueue)\n", thread->id);
+  destroyQueue(thread->processEventsQueue);
   
   pthread_cond_destroy(&(thread->idle_cv));
   pthread_mutex_destroy(&(thread->idle_mutex));
   thread->nodeDispatchEvents.Dispose();
-  thread->nodeJSObject.Dispose();
+  thread->nodeObject.Dispose();  //OJO Y SI QUEDAN OTRAS REFERENCIAS POR AHÍ QUÉ PASA?
   
   if (thread->ended) {
     // Esta thread llegó a funcionar alguna vez
@@ -745,8 +728,7 @@ static void Callback (
                            
   HandleScope scope;
   
-  typeJob* job;
-  typeQueueItem* qitem;
+  eventsQueueItem* event;
   typeThread* thread= (typeThread*) watcher;
   
   if (thread->ended) {
@@ -762,63 +744,60 @@ static void Callback (
   Local<Value> null= Local<Value>::New(Null());
   
   TryCatch onError;
-  while ((qitem= qPull(thread->threadToProcessQueue))) {
+  while ((event= qPull(thread->processEventsQueue))) {
   
     DEBUG && printf("CALLBACK %ld IN MAIN THREAD\n", thread->id);
-    
-    job= &qitem->job;
 
-    if (job->jobType == kJobTypeEval) {
+    if (event->eventType == eventTypeEval) {
     
-      DEBUG && printf("CALLBACK kJobTypeEval IN MAIN THREAD\n");
+      DEBUG && printf("CALLBACK eventTypeEval IN MAIN THREAD\n");
       
-      if (job->eval.tiene_callBack) {
+      if (event->eval.hasCallback) {
       
-        str= job->eval.resultado;
+        str= event->eval.resultado;
 
-        if (job->eval.error) {
+        if (event->eval.error) {
           args[0]= Exception::Error(String::New(**str, (*str).length()));
           args[1]= null;
         } else {
           args[0]= null;
           args[1]= String::New(**str, (*str).length());
         }
-        job->cb->CallAsFunction(thread->nodeJSObject, 2, args);
-        job->cb.Dispose();
-        job->eval.tiene_callBack= 0;
-        delete job->eval.resultado;
+        event->eval.callback->CallAsFunction(thread->nodeObject, 2, args);
+        event->eval.callback.Dispose();
+        delete event->eval.resultado;
       }
 
-      job->done= 1;
+      event->eventType = eventTypeNone;
       
       if (onError.HasCaught()) {
         node::FatalException(onError);
         return;
       }
     }
-    else if (job->jobType == kJobTypeEvent) {
+    else if (event->eventType == eventTypeEmit) {
     
-      DEBUG && printf("CALLBACK kJobTypeEvent IN MAIN THREAD\n");
+      DEBUG && printf("CALLBACK eventTypeEmit IN MAIN THREAD\n");
       //fprintf(stdout, "*** Callback\n");
       
-      str= job->event.eventName;
+      str= event->emit.eventName;
       args[0]= String::New(**str, (*str).length());
-      delete job->event.eventName;
-      array= Array::New(job->event.length);
+      delete event->emit.eventName;
+      array= Array::New(event->emit.argc);
       args[1]= array;
       
-      if (job->event.length) {
+      if (event->emit.argc) {
         int i= 0;
         do {
-          str= job->event.argumentos[i];
+          str= event->emit.argv[i];
           array->Set(i, String::New(**str, (*str).length()));
-          delete job->event.argumentos[i];
-        } while (++i < job->event.length);
-        free(job->event.argumentos);
+          delete event->emit.argv[i];
+        } while (++i < event->emit.argc);
+        free(event->emit.argv);
       }
 
       thread->nodeDispatchEvents->CallAsFunction(Context::GetCurrent()->Global(), 2, args);
-      job->done= 1;
+      event->eventType = eventTypeNone;
     }
     else {
       assert(1);
@@ -885,7 +864,7 @@ static Handle<Value> Destroy (const Arguments &args) {
 
 
 
-// Eval: Pushes a job into the thread's ->processToThreadQueue.
+// Eval: Pushes an eval job to the threadEventsQueue.
 static Handle<Value> Eval (const Arguments &args) {
   HandleScope scope;
   
@@ -898,18 +877,14 @@ static Handle<Value> Eval (const Arguments &args) {
     return ThrowException(Exception::TypeError(String::New("thread.eval(): the receiver must be a thread object")));
   }
 
-  typeQueueItem* qitem= nuQitem(thread->processToThreadQueue);
-  typeJob* job= &qitem->job;
-  
-  job->eval.tiene_callBack= ((args.Length() > 1) && (args[1]->IsFunction()));
-  if (job->eval.tiene_callBack) {
-    job->cb= Persistent<Object>::New(args[1]->ToObject());
+  eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
+  event->eval.hasCallback= (args.Length() > 1) && (args[1]->IsFunction());
+  if (event->eval.hasCallback) {
+    event->eval.callback= Persistent<Object>::New(args[1]->ToObject());
   }
-  job->eval.scriptText_StringObject= new String::Utf8Value(args[0]);
-  job->eval.useStringObject= 1;
-  job->jobType= kJobTypeEval;
-  
-  qPush(qitem, thread->processToThreadQueue);
+  event->eval.scriptText= new String::Utf8Value(args[0]);
+  event->eventType= eventTypeEval;
+  qPush(event, thread->threadEventsQueue);
   wakeUpThread(thread);
   return args.This();
 }
@@ -921,30 +896,36 @@ static Handle<Value> Eval (const Arguments &args) {
 
 
 
+static void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
+  eventsQueueItem* event= nuQitem(queue);
+  event->eventType= eventTypeEmit;
+  event->emit.eventName= new String::Utf8Value(args[0]);
+  event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
+  if (event->emit.argc) {
+    event->emit.argc= args.Length()- 1;
+    event->emit.argv= (String::Utf8Value**) malloc(event->emit.argc * sizeof(void*));
+    int i= 0;
+    do {
+      event->emit.argv[i]= new String::Utf8Value(args[i+1]);
+    } while (++i < event->emit.argc);
+  }
+  qPush(event, queue);
+}
+
+
+
+
+
+
+
+
 static Handle<Value> processEmit (const Arguments &args) {
-  HandleScope scope;
-  
   if (!args.Length()) return args.This();
-  
   typeThread* thread= isAThread(args.This());
   if (!thread) {
-    return ThrowException(Exception::TypeError(String::New("thread.emit(): the receiver must be a thread object")));
+    return ThrowException(Exception::TypeError(String::New("thread.emit(): 'this' must be a thread object")));
   }
-  
-  typeQueueItem* qitem= nuQitem(thread->processToThreadQueue);
-  typeJob* job= &qitem->job;
-  
-  job->jobType= kJobTypeEvent;
-  job->event.length= args.Length()- 1;
-  job->event.eventName= new String::Utf8Value(args[0]);
-  job->event.argumentos= (v8::String::Utf8Value**) malloc(job->event.length* sizeof(void*));
-  
-  int i= 1;
-  do {
-    job->event.argumentos[i-1]= new String::Utf8Value(args[i]);
-  } while (++i <= job->event.length);
-  
-  qPush(qitem, thread->processToThreadQueue);
+  pushEmitEvent(thread->threadEventsQueue, args);
   wakeUpThread(thread);
   return args.This();
 }
@@ -957,27 +938,10 @@ static Handle<Value> processEmit (const Arguments &args) {
 
 
 static Handle<Value> threadEmit (const Arguments &args) {
-  HandleScope scope;
-  
   if (!args.Length()) return args.This();
-  
   typeThread* thread= (typeThread*) Isolate::GetCurrent()->GetData();
-  typeQueueItem* qitem= nuQitem(thread->threadToProcessQueue);
-  typeJob* job= &qitem->job;
-  
-  job->jobType= kJobTypeEvent;
-  job->event.eventName= new String::Utf8Value(args[0]);
-  if (args.Length() > 1) {
-    job->event.length= args.Length()- 1;
-    job->event.argumentos= (String::Utf8Value**) malloc(job->event.length * sizeof(void*));
-    int i= 0;
-    do {
-      job->event.argumentos[i]= new String::Utf8Value(args[i+1]);
-    } while (++i < job->event.length);
-  }
-  
-  qPush(qitem, thread->threadToProcessQueue);
-  WAKEUP_EVENT_LOOP
+  pushEmitEvent(thread->processEventsQueue, args);
+  WAKEUP_NODES_EVENT_LOOP
   return args.This();
 }
 
@@ -995,12 +959,12 @@ static Handle<Value> Create (const Arguments &args) {
     typeThread* thread= (typeThread*) calloc(1, sizeof (typeThread));
     thread->id= threadsCtr++;
     thread->threadMagicCookie= kThreadMagicCookie;
-    thread->processToThreadQueue= nuQueue();
-    thread->threadToProcessQueue= nuQueue();
-    thread->nodeJSObject= Persistent<Object>::New(threadTemplate->NewInstance());
-    thread->nodeJSObject->SetPointerInInternalField(0, thread);
-    thread->nodeJSObject->Set(id_symbol, Integer::New(thread->id));
-    thread->nodeDispatchEvents= Persistent<Object>::New(boot_js->CallAsFunction(thread->nodeJSObject, 0, NULL)->ToObject());
+    thread->threadEventsQueue= nuQueue();
+    thread->processEventsQueue= nuQueue();
+    thread->nodeObject= Persistent<Object>::New(threadTemplate->NewInstance());
+    thread->nodeObject->SetPointerInInternalField(0, thread);
+    thread->nodeObject->Set(id_symbol, Integer::New(thread->id));
+    thread->nodeDispatchEvents= Persistent<Object>::New(boot_js->CallAsFunction(thread->nodeObject, 0, NULL)->ToObject());
     
     pthread_cond_init(&(thread->idle_cv), NULL);
     pthread_mutex_init(&(thread->idle_mutex), NULL);
@@ -1035,7 +999,7 @@ static Handle<Value> Create (const Arguments &args) {
     
     }
 
-    return thread->nodeJSObject;
+    return thread->nodeObject;
 }
 
 
