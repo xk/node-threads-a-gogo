@@ -38,7 +38,8 @@ using namespace v8;
 typedef enum eventTypes {
   eventTypeNone = 0,
   eventTypeEmit,
-  eventTypeEval
+  eventTypeEval,
+  eventTypeLoad
 } eventTypes;
 
 struct emitStruct {
@@ -50,26 +51,35 @@ struct emitStruct {
 struct evalStruct {
   int error;
   int hasCallback;
-  Persistent<Object> callback;
   String::Utf8Value* resultado;
   String::Utf8Value* scriptText;
+};
+
+struct loadStruct {
+  int error;
+  int hasCallback;
+  String::Utf8Value* path;
 };
 
 struct eventsQueueItem {
   eventsQueueItem* next;
   int eventType;
-  emitStruct emit;
-  evalStruct eval;
+  Persistent<Object> callback;
+  union {
+    emitStruct emit;
+    evalStruct eval;
+    loadStruct load;
+  };
 };
 
-typedef struct eventsQueue {
+struct eventsQueue {
   eventsQueueItem* first;
   eventsQueueItem* pullPtr;
   union {
     eventsQueueItem* pushPtr;
     eventsQueueItem* last;
   };
-} eventsQueue;
+};
 
 typedef enum killTypes {
   kKillNicely= 1,
@@ -137,6 +147,8 @@ static void Callback (
                            , int);
 static Handle<Value> Destroy (const Arguments &);
 static Handle<Value> Eval (const Arguments &);
+static Handle<Value> Load (const Arguments &);
+static inline void pushEmitEvent (eventsQueue*, const Arguments &);
 static Handle<Value> processEmit (const Arguments &);
 static Handle<Value> threadEmit (const Arguments &);
 static Handle<Value> Create (const Arguments &);
@@ -581,7 +593,7 @@ static void eventLoop (typeThread* thread) {
               event->eventType= eventTypeNone;
             }
             else {
-              assert(1);
+              assert(0);
             }
           }
           else
@@ -763,8 +775,8 @@ static void Callback (
           args[0]= null;
           args[1]= String::New(**str, (*str).length());
         }
-        event->eval.callback->CallAsFunction(thread->nodeObject, 2, args);
-        event->eval.callback.Dispose();
+        event->callback->CallAsFunction(thread->nodeObject, 2, args);
+        event->callback.Dispose();
         delete event->eval.resultado;
       }
 
@@ -800,7 +812,7 @@ static void Callback (
       event->eventType = eventTypeNone;
     }
     else {
-      assert(1);
+      assert(0);
     }
   }
 }
@@ -880,7 +892,7 @@ static Handle<Value> Eval (const Arguments &args) {
   eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
   event->eval.hasCallback= (args.Length() > 1) && (args[1]->IsFunction());
   if (event->eval.hasCallback) {
-    event->eval.callback= Persistent<Object>::New(args[1]->ToObject());
+    event->callback= Persistent<Object>::New(args[1]->ToObject());
   }
   event->eval.scriptText= new String::Utf8Value(args[0]);
   event->eventType= eventTypeEval;
@@ -896,7 +908,39 @@ static Handle<Value> Eval (const Arguments &args) {
 
 
 
-static void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
+// Load: Loads from file and passes to Eval
+static Handle<Value> Load (const Arguments &args) {
+  HandleScope scope;
+
+  if (!args.Length()) {
+    return ThrowException(Exception::TypeError(String::New("thread.load(filename [,callback]): missing arguments")));
+  }
+
+  typeThread* thread= isAThread(args.This());
+  if (!thread) {
+    return ThrowException(Exception::TypeError(String::New("thread.load(): the receiver must be a thread object")));
+  }
+  
+  eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
+  event->eventType= eventTypeLoad;
+  event->load.path= new String::Utf8Value(args[0]);
+  event->load.hasCallback= ((args.Length() > 1) && (args[1]->IsFunction()));
+  if (event->load.hasCallback) {
+    event->callback= Persistent<Object>::New(args[1]->ToObject());
+  }
+  qPush(event, thread->threadEventsQueue);
+  wakeUpThread(thread);
+  return args.This();
+}
+
+
+
+
+
+
+
+
+static inline void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
   eventsQueueItem* event= nuQitem(queue);
   event->eventType= eventTypeEmit;
   event->emit.eventName= new String::Utf8Value(args[0]);
@@ -977,7 +1021,7 @@ static Handle<Value> Create (const Arguments &args) {
       if (!err) break;
       errstr= strerror(err);
       printf("THREAD %ld PTHREAD_CREATE() ERROR %d : %s RETRYING %d\n", thread->id, err, errstr, retry);
-      usleep(50000);
+      usleep(100000);
     } while (--retry);
     
     if (err) {
@@ -1017,6 +1061,7 @@ void Init (Handle<Object> target) {
   
   threadTemplate= Persistent<ObjectTemplate>::New(ObjectTemplate::New());
   threadTemplate->SetInternalFieldCount(1);
+  threadTemplate->Set(String::NewSymbol("load"), FunctionTemplate::New(Load));
   threadTemplate->Set(String::NewSymbol("eval"), FunctionTemplate::New(Eval));
   threadTemplate->Set(String::NewSymbol("emit"), FunctionTemplate::New(processEmit));
   threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));

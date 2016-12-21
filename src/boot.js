@@ -40,11 +40,6 @@ function boot (that,CHUNK,_on,_ntq,global) {
     }
     return _ntq.length;
   }
-
-  function load (path, cb) {
-    that.eval(require('fs').readFileSync(path, 'utf8'), cb);
-    return that;
-  }
   
   function on (event,f,q) {
     (q= _on[event]) ? q.push(f) : (_on[event]= [f]);
@@ -73,13 +68,12 @@ function boot (that,CHUNK,_on,_ntq,global) {
       q.forEach(function (v,i,o) { v.apply(that, argumentos) });
     }
   }
-  
+    
   global= (function () { return this })();
   if (global.process) {
     that.on= on;
     that.once= once;
     that._on= _on= {};
-    that.load= load;
     that.removeAllListeners= removeAllListeners;
     that.version= version;
     return dispatchEvents;

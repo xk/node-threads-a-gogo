@@ -5,73 +5,100 @@
 
 var assert = require('assert');
 
+var steps= 0;
+function step (msg) {
+  process.stdout.write(steps+ '.'+ msg);
+  steps+= 1;
+}
+
+function rndStr(l, a, str) {
+    a = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    str = "";
+    while (l--) str += a[Math.floor(a.length * Math.random())];
+    return str;
+}
+
 var tagg= require('threads_a_gogo');
-process.stdout.write('0.OK.');
+step('OK.');
 assert.equal(typeof process.versions.threads_a_gogo, 'string');
-process.stdout.write('1.OK.');
+step('OK.');
 assert.equal(typeof tagg.create, 'function');
-process.stdout.write('2.OK.');
+step('OK.');
 assert.equal(typeof tagg.createPool, 'function');
-process.stdout.write('3.TAGG OBJECT OK\n');
+step('TAGG OBJECT OK\n');
+
 function boot () {
   thread.on('hello', function f (a,b,c) {
     thread.emit('hello', thread.id, this.id, a, b, c);
   });
   return 'to_eval_cb';
 }
-var t= tagg.create().eval("("+ boot+ ")()", cb);
-process.stdout.write('4.OK.');
-assert.equal(typeof t.id, 'number');
-process.stdout.write('5.OK.');
-assert.equal(typeof t.eval, 'function');
-process.stdout.write('6.OK.');
-assert.equal(typeof t.emit, 'function');
-process.stdout.write('7.OK.');
-assert.equal(typeof t.destroy, 'function');
-process.stdout.write('8.OK.');
-assert.equal(typeof t.on, 'function');
-process.stdout.write('9.OK.');
-assert.equal(typeof t._on, 'object');
-process.stdout.write('10.OK.');
-assert.equal(typeof t.load, 'function');
-process.stdout.write('11.OK.');
-assert.equal(typeof t.removeAllListeners, 'function');
-process.stdout.write('12.THREAD OBJECT OK\n');
-assert.equal(typeof t.version, 'string');
-process.stdout.write('13.OK.WAITING FOR EVAL CB\n');
 
-function cb (a,b) {
+var name= rndStr(12)+ '.tagg.test.js';
+var path= (process.env.TMPDIR || '/tmp/')+ name;
+require('fs').writeFileSync(path, boot);
+
+var t= tagg.create()/*.load(path, cb)*/.eval("("+ boot+ ")()", cb1);
+step('OK.');
+assert.equal(typeof t.id, 'number');
+step('OK.');
+assert.equal(typeof t.eval, 'function');
+step('OK.');
+assert.equal(typeof t.emit, 'function');
+step('OK.');
+assert.equal(typeof t.destroy, 'function');
+step('OK.');
+assert.equal(typeof t.on, 'function');
+step('OK.');
+assert.equal(typeof t._on, 'object');
+step('OK.');
+assert.equal(typeof t.load, 'function');
+step('OK.');
+assert.equal(typeof t.removeAllListeners, 'function');
+step('THREAD OBJECT OK\n');
+assert.equal(typeof t.version, 'string');
+step('OK.WAITING FOR LOAD CB\n');
+
+function cb (a) {
   assert.equal(t.id, this.id);
-  process.stdout.write('14.OK.');
+  step('OK.');
   assert.equal(!!a, false);
-  process.stdout.write('15.OK.');
+  step('LOAD CALLBACK OK\n');
+  step('OK.WAITING FOR EVAL CB\n');
+}
+
+function cb1 (a,b) {
+  assert.equal(t.id, this.id);
+  step('OK.');
+  assert.equal(!!a, false);
+  step('OK.');
   assert.equal(b, 'to_eval_cb');
-  process.stdout.write('16.EVAL CALLBACK OK\n');
+  step('EVAL CALLBACK OK\n');
   this.on('hello', cb2).emit('hello','hello','tagg','world');
-  process.stdout.write('17.OK.WAITING FOR EVENT LISTENER CB\n');
+  step('OK.WAITING FOR EVENT LISTENER CB\n');
 }
 
 function cb2 (tid1,tid2,a,b,c) {
   assert.equal(t.id, this.id);
-  process.stdout.write('18.OK.');
+  step('OK.');
   assert.equal(+tid1, t.id);
-  process.stdout.write('19.OK.');
+  step('OK.');
   assert.equal(+tid2, t.id);
-  process.stdout.write('20.OK.');
+  step('OK.');
   assert.equal(a, 'hello');
-  process.stdout.write('21.OK.');
+  step('OK.');
   assert.equal(b, 'tagg');
-  process.stdout.write('22.OK.');
+  step('OK.');
   assert.equal(c, 'world');
-  process.stdout.write('23.EVENT LISTENER CB.OK\n');
+  step('EVENT LISTENER CB.OK\n');
   this.destroy(0,cb3);
-  process.stdout.write('24.OK.WAITING FOR DESTROY CB\n');
+  step('OK.WAITING FOR DESTROY CB\n');
 }
 
 function cb3 () {
-  process.stdout.write('25.OK.');
+  step('OK.');
   assert.equal(this, global);
-  process.stdout.write('26.DESTROY CB OK\nEND\n');
+  step('DESTROY CB OK\nEND\n');
   process.stdout.write('THREADS_A_GOGO v'
                + process.versions.threads_a_gogo
                + ' BASIC FUNCTIONALITY TEST: OK, IT WORKS!\n');

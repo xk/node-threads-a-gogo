@@ -1,5 +1,7 @@
 
 
+var newLine= "\\n";
+
 function hex (str,txt,i,c,v) {
     txt= "";
     for (i=0 ; i<str.length ; i+=1) {
@@ -7,8 +9,8 @@ function hex (str,txt,i,c,v) {
         v= c.charCodeAt(0);
         if (c === "\"") txt+= "\\\"";
         else if ((v < 127) && (c >= " ")) txt+= c;
-        else if (c === "\n") txt+= "\\n";
-        else if (c === "\r") txt+= "\\n";
+        else if (c === "\n") txt+= newLine;
+        else if (c === "\r") txt+= newLine;
         else if (v > 127) {
             c= v.toString(16);
             while (c.length < 4) c= "0"+ c;
@@ -54,7 +56,6 @@ var theA;
 var theB;
 var EOF= "EOF";
 var theLookahead = EOF;
-
 
 /* puts -- write a string
                 to a stream.
@@ -239,7 +240,8 @@ function jsmin () {
         case " ":
             if (isAlphanum(theB)) {
                 action(1);
-            } else {
+            }
+            else {
                 action(2);
             }
             break;
@@ -313,7 +315,7 @@ function jstoc (file,cVarName,fs,txt) {
     txt= "\nstatic const char* "
            + cVarName+ "= \""
            + hex(jsminjs(fs.readFileSync(file, "utf8")))
-           + "\";\n";
+           + "\";\x0a";
 
     fs.writeFileSync(file+ ".c", txt, "utf8");
     console.log("*** THREADS_A_GOGO: JS2C("+ cVarName+ "): OK");
