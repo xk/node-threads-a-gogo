@@ -33,8 +33,5 @@
   "engines": {
     "node": ">=0.5.1 <0.11"
   },
-  "dependencies": {
-  	"bindings":"*"
-  },
   "devDependencies": { "test": ">=0.1.8" }
 }
