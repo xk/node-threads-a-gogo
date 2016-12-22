@@ -253,11 +253,14 @@ The `examples` directory contains a few more examples:
 * [ex06_jason](https://github.com/xk/node-threads-a-gogo/blob/master/examples/ex06_jason.md): Passing complex objects to threads.
 
 ## Module API
+## TAGG Object API
 ``` javascript
-tagg= require('threads_a_gogo')
+tagg= require('threads_a_gogo') -> tagg object
+
 { create: [Function],
   createPool: [Function: createPool],
   version: '0.1.8' }
+  
 ```
 ### .create()
 `tagg.create( /* no arguments */ )` -> thread object
@@ -267,9 +270,10 @@ tagg= require('threads_a_gogo')
 `tagg.version` -> A string with the threads_a_gogo version number.
 
 ***
-## Thread Object API (the thread object you get in node's main thread)
+## Thread Object API (this is the thread object you get in node's main thread)
 ``` javascript
-thread= tagg.create()
+thread= tagg.create() -> thread object
+
 { load: [Function: load],
   eval: [Function: eval],
   emit: [Function: emit],
@@ -280,79 +284,172 @@ thread= tagg.create()
   once: [Function: once],
   _on: {},
   removeAllListeners: [Function: removeAllListeners] }
+  
 ```
 ### .id
-`thread.id` -> a sequential thread serial number.
+`thread.id` -> A sequential thread serial number.
 ### .version
 `thread.version` -> A string with the threads_a_gogo version number.
-### .load( absolutePath [, cb] )
-`thread.load( path [, cb] )` -> reads the file at `path` and `thread.eval(fileContents, cb)`.
-### .eval( program [, cb])
-`thread.eval( program [, cb])` -> converts `program.toString()` and eval()s it in the thread's global context, and (if provided) returns the completion value to `cb(err, completionValue)`.
-### .on( eventType, listener )
-`thread.on( eventType, listener )` -> registers the listener `listener(data)` for any events of `eventType` that the thread `thread` may emit.
-### .once( eventType, listener )
-`thread.once( eventType, listener )` -> like `thread.on()`, but the listener will only be called once.
-### .removeAllListeners( [eventType] )
-`thread.removeAllListeners( [eventType] )` -> deletes all listeners for all eventTypes. If `eventType` is provided, deletes all listeners only for the event type `eventType`.
-### .emit( eventType, eventData [, eventData ... ] )
-`thread.emit( eventType, eventData [, eventData ... ] )` -> emit an event of `eventType` with `eventData` inside the thread `thread`. All its arguments are .toString()ed.
-### .destroy( /* no arguments */ )
-`thread.destroy( [0 (nicely) | 1 (rudely)] [, cb])` -> destroys the thread. If the first parameter is 0 ('nicely', the default) the thread will keep running until both its nextTick queue and its pending jobs queue are empty. If it's 1 (rudely) the thread's event loop will exit as soon as possible, regardless. If a callback cb (optional) is provided, it will be called when the thread has been killed and completely destroyed, the cb will receive no arguments and with 'this' pointing to the global object.
+### .load( path [, cb] )
+`thread.load( path [, cb] )` -> thread
 
+Loads the file at `path` and `thread.eval(fileContents, cb)`.
+
+NOTE that most methods return the `thread` object so that calls can be chained like this: `thread.load("boot.js").eval("boot()").emit("go").on("event", cb)` ...
+
+### .eval( program [, cb])
+`thread.eval( program [, cb])` -> thread
+
+Converts `program.toString()` and eval()s (which is the equivalent of loading a script in a browser) it in the thread's global context, and (if provided) returns to a callback the completion value: `cb(err, completionValue)`. Some examples you can try in node's console, but first please declare a `function cb (a,b) { console.log(a,b) }`, that will be handy, then type `thread.eval("Math.random()", cb)` the thread will run that (`Math.random()`) and the `cb(err,result)` will get (and display) a `null (random number)`. A `thread.eval('function hello () { puts("Hello!"); return "world!"; }', cb)` will eval that in the global context of the thread and thus create a global function hello in the thread's js global context and your `cb(err,result)` will get `null undefined` in the result, `null` because there were no errors and `undefined` because the completion value of a function declaration is `undefined`. On the plus side, now you have injected for the first time in your life some js code of yours in a TAGG's thread and you can tell it to run that, do a `thread.eval('hello()',cb)` and the thread will print `Hello!` in the console and the `cb(err,result)` will receive `world!` into result. How cool is that?
+### .on( eventType, listener )
+`thread.on( eventType, listener )` -> thread
+
+Registers the listener `listener(data [, data2 ... ])` for any events of `eventType` that the thread `thread` may emit. For example, declare a `function cb (a,b,c) { console.log(a,b,c) }` and then do `thread.on("event", cb)`. Now whenever the thread emits an event of the type `event` (which by the way can be any arbitrary name/string you choose), `cb` will be triggered. Let's do that with a `thread.eval('i=5; while (i--) thread.emit("event", "How", "cool", "is that?");')` and the console will display `How cool is that?` five times, huh, unbelievable.
+### .once( eventType, listener )
+`thread.once( eventType, listener )` -> thread
+
+Like `thread.on()`, but the listener will only be triggered once.
+### .removeAllListeners( [eventType] )
+`thread.removeAllListeners( [eventType] )` -> thread
+
+Deletes all listeners for all eventTypes unless `eventType` is provided, in which case it deletes the listeners only of the event type `eventType`.
+### .emit( eventType, eventData [, eventData ... ] )
+`thread.emit( eventType, eventData [, eventData ... ] )` -> thread
+
+Emit an event of `eventType` with `eventData` in the thread `thread`. All its arguments are .toString()ed.
+### .destroy( [ rudely ] )
+`thread.destroy( [0 (nicely) | 1 (rudely)] [, cb])` -> undefined
+
+Destroys the thread. If the first parameter is not provided or falsy or 0 (the default) the thread will keep running until both its nextTick/setImmediate queue and its pending `.eval()` jobs queue are empty. If it's truthy or 1 (rudely) the thread's event loop will exit as soon as possible, regardless. If a callback cb (optional) is provided, it will be called when the thread has been killed and completely destroyed, the cb will receive no arguments and the receiver (its 'this') points to the global object. If the thread is stuck in a while (1) ; or similar it won't end and currently tagg has no way around that. At least not yet. Pull requests are very much welcomed, just so you know.
+### _on
+Ignore, don't touch that. The `_on` object holds the event listeners.
+***
+## Thread object API (this is the thread object that exists not in node but as a global in every thread)
+
+Inside every thread .create()d by threads_a_gogo, there's a global `thread` object with these properties:
+``` javascript
+thread (a global) ->
+
+{ id: 0,
+  version: '0.1.8',
+  on: [Function: on],
+  once: [Function: once],load: [Function: load],
+  emit: [Function: emit],
+  removeAllListeners: [Function: removeAllListeners]
+  nextTick: [Function: nextTick],
+  _on: {},
+  _ntq: [] }
+
+```
+### .id
+`thread.id` -> the serial number of this thread
+### .version
+`thread.version` -> A string with the threads_a_gogo version number.
+### .on( eventType, listener )
+`thread.on( eventType, listener )` -> thread
+
+Just like `thread.on()` above. But in this case it will receive events emitted by node's main thread, because, remeber, all this exists in the thread's own js context which is totally independent of node's js context.
+### .once( eventType, listener )
+`thread.once( eventType, listener )` -> thread
+
+Just like `thread.once()` above.
+### .emit( eventType, eventData [, eventData ... ] )
+`thread.emit( eventType, eventData [, eventData ... ] )` -> thread
+
+Just like `thread.emit()` above. What this emits will trigger a listener (if set) in node's main thread.
+### .removeAllListeners( [eventType] )
+`thread.removeAllListeners( [eventType] )` -> thread
+
+Just like `thread.removeAllListeners()` above.
+### .nextTick( function )
+`thread.nextTick( function )` -> undefined
+
+Like `setImmediate()`, but twice as fast. Every thread runs its own event loop. First it looks for any .eval()s that node may have sent, if there are any it runs the first one, after that it looks in the nextTick/setImmediate queue, if there are any functions there to run, it runs them all (but only in chunks of up to 8192 so that nextTick/setImmediate can never totally block a thread), and then looks again to see if there are any more .eval() events, if there are runs the first one, and repeats this loop forever until there are no more .eval() events nor nextTick/setImmediate functions at which point the thread goes to sleep until any further .eval()s or .emit()s sent from node awake it.
+### _on
+Ignore, don't touch that. The `_on` object holds the event listeners.
+### _ntq
+Ignore, don't touch that. The `_ntq` array holds the nextTick()ed and/or setImmediate()d funcitons.
+
+***
+## Globals in the threads' js contexts
+
+Inside every thread .create()d by threads_a_gogo, on top of the usual javascript ones there's these other globals:
+### puts(arg1 [, arg2 ...])
+`puts(arg1 [, arg2 ...])` -> undefined
+
+.toString()s and fprintf(stdout)s and fflush(stdout)es its arguments to (you guessed it) stdout.
+### setImmediate(function)
+`setImmediate( function )` -> undefined
+
+Just an alias for `thread.nextTick(function)`.
+### thread
+The thread object described above is also a global.
 ***
 ## Thread pool API
 ``` javascript
-threadPool= tagg.createPool( numberOfThreads );
+pool= tagg.createPool( numbreOfThreads ) ->
+
+{ load: [Function: load],
+  on: [Function: on],
+  any: 
+   { eval: [Function: evalAny],
+     emit: [Function: emitAny] },
+  all: 
+   { eval: [Function: evalAll],
+     emit: [Function: emitAll] },
+  totalThreads: [Function: getTotalThreads],
+  idleThreads: [Function: getIdleThreads],
+  pendingJobs: [Function: getPendingJobs],
+  destroy: [Function: destroy],
+  pool: 
+   [ { load: [Function: load],
+       eval: [Function: eval],
+       emit: [Function: emit],
+       destroy: [Function: destroy],
+       id: 0,
+       version: '0.1.8',
+       on: [Function: on],
+       once: [Function: once],
+       _on: {},
+       removeAllListeners: [Function: removeAllListeners] } ] }
+
 ```
-##### .load( absolutePath [, cb] )
-`threadPool.load( absolutePath [, cb] )` -> `thread.load( absolutePath [, cb] )` in all the pool's threads.
-##### .any.eval( program, cb )
-`threadPool.any.eval( program, cb )` -> like `thread.eval()`, but in any of the pool's threads.
-##### .any.emit( eventType, eventData [, eventData ... ] )
-`threadPool.any.emit( eventType, eventData [, eventData ... ] )` -> like `thread.emit()` but in any of the pool's threads.
-##### .all.eval( program, cb )
-`threadPool.all.eval( program, cb )` -> like `thread.eval()`, but in all the pool's threads.
-##### .all.emit( eventType, eventData [, eventData ... ] )
-`threadPool.all.emit( eventType, eventData [, eventData ... ] )` -> like `thread.emit()` but in all the pool's threads.
-##### .on( eventType, listener )
-`threadPool.on( eventType, listener )` -> like `thread.on()`, registers listeners for events from any of the threads in the pool.
-##### .totalThreads()
-`threadPool.totalThreads()` -> returns the number of threads in this pool: as supplied in `.createPool( number )`
-##### .idleThreads()
-`threadPool.idleThreads()` -> returns the number of threads in this pool that are currently idle.
-##### .pendingJobs()
-`threadPool.pendingJobs()` -> returns the number of jobs pending.
-##### .destroy( [ rudely ] )
-`threadPool.destroy( [ rudely ] )` -> if rudely is 0 or falsy the thread will exit when there aren't any more events in its events queue. If rudely it will quit regardless of that. If stuck in a while (1) ; or similar it won't and currently tagg has no way around that. At least not yet. Pull requests are very much welcomed, just so you know.
+### .load( path [, cb] )
+`pool.load( path [, cb] )` -> pool
 
-***
-### Global thread API
+`thread.load( path [, cb] )` in every one of the pool's threads. The cb will be called as many times as threads there are.
+### .on( eventType, listener )
+`pool.on( eventType, listener )` -> pool
 
-Inside every thread .create()d by threads_a_gogo, there's a global `thread` object with these properties:
-##### .id
-`thread.id` -> the serial number of this thread
-##### .on( eventType, listener )
-`thread.on( eventType, listener )` -> just like `thread.on()` above.
-##### .once( eventType, listener )
-`thread.once( eventType, listener )` -> just like `thread.once()` above.
-##### .emit( eventType, eventData [, eventData ... ] )
-`thread.emit( eventType, eventData [, eventData ... ] )` -> just like `thread.emit()` above.
-##### .removeAllListeners( [eventType] )
-`thread.removeAllListeners( [eventType] )` -> just like `thread.removeAllListeners()` above.
-##### .nextTick( function )
-`thread.nextTick( function )` -> like `setImmediate()`, but twice as fast.
+Registers a listener for events of eventType. Any events of eventType emitted by any thread of the pool will trigger that cb/listener. For example, if you set a `pool.on("event", cb)` and any thread does a `thread.emit("event", "Hi", "there")`, a `cb(a,b)` will receive "Hi" in a and "There" in b.
+### .any.eval( program, cb )
+`pool.any.eval( program, cb )` -> pool
 
-***
-### Globals in the threads' contexts
+Like `thread.eval()`, but in any of the pool's threads.
+### .any.emit( eventType, eventData [, eventData ... ] )
+`pool.any.emit( eventType, eventData [, eventData ... ] )` -> pool
 
-Inside every thread .create()d by threads_a_gogo, there's these globals:
-##### puts(arg1 [, arg2 ...])
-`puts(arg1 [, arg2 ...])` -> .toString()s and prints its arguments to stdout.
-##### setImmediate(function)
-`setImmediate( function )` -> just an alias for thread.nextTick(function).
-##### thread
-The thread object described above.
+Like `thread.emit()` but in any of the pool's threads.
+### .all.eval( program, cb )
+`pool.all.eval( program, cb )` -> pool
+
+Like `thread.eval()`, but in all the pool's threads.
+### .all.emit( eventType, eventData [, eventData ... ] )
+`pool.all.emit( eventType, eventData [, eventData ... ] )` -> pool
+
+Like `thread.emit()` but in all the pool's threads.
+### .totalThreads()
+`pool.totalThreads()` -> returns the number of threads in this pool: as supplied in `.createPool( number )`. It's also the same as `pool.pool.length`.
+### .idleThreads()
+`pool.idleThreads()` -> returns the number of threads in this pool that are currently idle. Does not work very well currently. Better don't use it.
+### .pendingJobs()
+`threadPool.pendingJobs()` -> returns the number of jobs pending. Does not work very well currently. Better don't use it.
+### .destroy( [ rudely ] )
+`pool.destroy( [ rudely ] )` -> undefined
+
+If rudely is 0 or falsy the thread will exit when there aren't any more events in its events queue. If rudely it will quit regardless of that. If stuck in a while (1) ; or similar it won't and currently tagg has no way around that. At least not yet. Pull requests are very much welcomed, just so you know.
+### .pool
+`pool.pool` is an array that contains all the threads in the thread pool for your tinkering pleasure.
 
 ## Rationale
 
