@@ -159,11 +159,14 @@ void Init (Handle<Object>);
 
 //Globals BEGIN
 
+const char* k_TAGG_VERSION= "0.1.8";
+
 static int DEBUG= 0;
 static bool useLocker;
 static long int threadsCtr= 0;
 static Persistent<Object> boot_js;
 static Persistent<String> id_symbol;
+static Persistent<String> version_symbol;
 static Persistent<ObjectTemplate> threadTemplate;
 static eventsQueue* qitemStore;
 
@@ -506,6 +509,7 @@ static void eventLoop (typeThread* thread) {
   global->Set(String::New("puts"), FunctionTemplate::New(Puts)->GetFunction());
   Local<Object> threadObject= Object::New();
   threadObject->Set(String::New("id"), Number::New(thread->id));
+  threadObject->Set(String::New("version"),String::New(k_TAGG_VERSION));
   threadObject->Set(String::New("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
   Local<Object> script= Local<Object>::New(Script::Compile(String::New(kBoot_js))->Run()->ToObject());
   Local<Object> r= script->CallAsFunction(threadObject, 0, NULL)->ToObject();
@@ -1085,6 +1089,7 @@ static Handle<Value> Create (const Arguments &args) {
     thread->nodeObject= Persistent<Object>::New(threadTemplate->NewInstance());
     thread->nodeObject->SetPointerInInternalField(0, thread);
     thread->nodeObject->Set(id_symbol, Integer::New(thread->id));
+    thread->nodeObject->Set(version_symbol, String::New(k_TAGG_VERSION));
     thread->nodeDispatchEvents= Persistent<Object>::New(boot_js->CallAsFunction(thread->nodeObject, 0, NULL)->ToObject());
     
     pthread_cond_init(&(thread->idle_cv), NULL);
@@ -1134,6 +1139,7 @@ void Init (Handle<Object> target) {
   qitemStore= qitemStoreInit();
   useLocker= v8::Locker::IsActive();
   id_symbol= Persistent<String>::New(String::NewSymbol("id"));
+  version_symbol= Persistent<String>::New(String::NewSymbol("version"));
   boot_js= Persistent<Object>::New(Script::Compile(String::New(kBoot_js))->Run()->ToObject());
   
   threadTemplate= Persistent<ObjectTemplate>::New(ObjectTemplate::New());
@@ -1145,6 +1151,7 @@ void Init (Handle<Object> target) {
   
   target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
   target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kPool_js))->Run()->ToObject());
+  target->Set(version_symbol, String::New(k_TAGG_VERSION));
 }
 
 NODE_MODULE(threads_a_gogo, Init)
