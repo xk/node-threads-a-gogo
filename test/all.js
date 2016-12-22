@@ -20,8 +20,6 @@ function rndStr(l, a, str) {
 
 var tagg= require('threads_a_gogo');
 step('OK.');
-assert.equal(typeof process.versions.threads_a_gogo, 'string');
-step('OK.');
 assert.equal(typeof tagg.create, 'function');
 step('OK.');
 assert.equal(typeof tagg.createPool, 'function');
