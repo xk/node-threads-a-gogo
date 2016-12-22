@@ -14,12 +14,36 @@ From source:
 
     git clone http://github.com/xk/node-threads-a-gogo.git
     cd node-threads-a-gogo
+    #one of:
     node-gyp rebuild
-    # It also works with node-waf, but this is outdated, so please use node-gyp nowdays.
+    #or:
+    npm install
+    #or:
+    node-waf configure build install
+    # Depending of what wersion of node you've got.
+    # THREADS_A_GOGO CURRENTLY (v0.1.8) RUNS ON NODES v0.5.1 TO v0.10.48
+
+Basic functionality test:
+
+    cd node-threads-a-gogo
+    node test/all.js
+    # If all goes well should ouput something like this:
+    0.OK.1.OK.2.OK.3.TAGG OBJECT OK
+    4.OK.5.OK.6.OK.7.OK.8.OK.9.OK.10.OK.11.OK.12.THREAD OBJECT OK
+    13.OK.WAITING FOR LOAD CB
+    14.OK.15.LOAD CALLBACK OK
+    16.OK.WAITING FOR EVAL CB
+    17.OK.18.OK.19.EVAL CALLBACK OK
+    20.OK.WAITING FOR EVENT LISTENER CB
+    21.OK.22.OK.23.OK.24.OK.25.OK.26.EVENT LISTENER CB.OK
+    27.OK.WAITING FOR DESTROY CB
+    28.OK.29.DESTROY CB OK
+    END
+    THREADS_A_GOGO v0.1.8 BASIC FUNCTIONALITY TEST: OK, IT WORKS!
 
 To include the module in your project:
 
-    var threads_a_gogo= require('threads_a_gogo');
+    var tagg= require('threads_a_gogo');
 
 **You need a node with a v8 >= 3.2.4 to run this module. Any node >= 0.5.1 comes with a v8 >= 3.2.4.**
 
@@ -34,6 +58,7 @@ Both the event loop and said listeners and callbacks run sequentially in a singl
 **A.-** Here's a program that makes Node's event loop spin freely and as fast as possible: it simply prints a dot to the console in each turn:
 
     cat examples/quickIntro_loop.js
+    node examples/quickIntro_loop.js
     
 ``` javascript
 (function spinForever () {
@@ -45,6 +70,7 @@ Both the event loop and said listeners and callbacks run sequentially in a singl
 **B.-** Here's another program that adds to the one above a fibonacci(35) call in each turn, a CPU-bound task that takes quite a while to complete and that blocks the event loop making it spin slowly and clumsily. The point is simply to show that you can't put a job like that in the event loop because Node will stop performing properly when its event loop can't spin fast and freely due to a callback/listener/nextTick()ed function that's blocking.
 
     cat examples/quickIntro_blocking.js
+    node examples/quickIntro_blocking.js
 
 ``` javascript
 function fibo (n) {
@@ -65,6 +91,7 @@ function fibo (n) {
 **C.-** The program below uses `threads_a_gogo` to run the fibonacci(35) calls in a background thread, so Node's event loop isn't blocked at all and can spin freely again at full speed:
 
     cat examples/quickIntro_oneThread.js
+    node examples/quickIntro_oneThread.js
   
 ``` javascript
 function fibo (n) {
@@ -89,6 +116,7 @@ thread.eval(fibo).eval('fibo(35)', cb);
 **D.-** This example is almost identical to the one above, only that it creates 5 threads instead of one, each running a fibonacci(35) in parallel and in parallel too with Node's event loop that keeps spinning happily at full speed in its own thread:
 
     cat examples/quickIntro_fiveThreads.js
+    node examples/quickIntro_fiveThreads.js
   
 ``` javascript
 function fibo (n) {
@@ -100,13 +128,13 @@ function cb (err, data) {
   this.eval('fibo(35)', cb);
 }
 
-var threads_a_gogo= require('threads_a_gogo');
+var tagg= require('threads_a_gogo');
 
-threads_a_gogo.create().eval(fibo).eval('fibo(35)', cb);
-threads_a_gogo.create().eval(fibo).eval('fibo(35)', cb);
-threads_a_gogo.create().eval(fibo).eval('fibo(35)', cb);
-threads_a_gogo.create().eval(fibo).eval('fibo(35)', cb);
-threads_a_gogo.create().eval(fibo).eval('fibo(35)', cb);
+tagg.create().eval(fibo).eval('fibo(35)', cb);
+tagg.create().eval(fibo).eval('fibo(35)', cb);
+tagg.create().eval(fibo).eval('fibo(35)', cb);
+tagg.create().eval(fibo).eval('fibo(35)', cb);
+tagg.create().eval(fibo).eval('fibo(35)', cb);
 
 (function spinForever () {
   process.stdout.write(".");
@@ -116,7 +144,8 @@ threads_a_gogo.create().eval(fibo).eval('fibo(35)', cb);
 
 **E.-** The next one asks `threads_a_gogo` to create a pool of 10 background threads, instead of creating them manually one by one:
 
-    cat examples/multiThread.js
+    cat examples/quickIntro_multiThread.js
+    node examples/quickIntro_multiThread.js
 
 ``` javascript
 function fibo (n) {
@@ -140,6 +169,7 @@ threadPool.all.eval('fibo(35)', function cb (err, data) {
 **F.-** This is a demo of the `threads_a_gogo` eventEmitter API, using one thread:
 
     cat examples/quickIntro_oneThreadEvented.js
+    node examples/quickIntro_oneThreadEvented.js
 
 ``` javascript
 var thread= require('threads_a_gogo').create();
@@ -176,6 +206,7 @@ thread.on('theFiboIs', function cb (data) {
 **G.-** This is a demo of the `threads_a_gogo` eventEmitter API, using a pool of threads:
 
     cat examples/quickIntro_multiThreadEvented.js
+    node examples/quickIntro_multiThreadEvented.js
 
 ``` javascript
 var numThreads= 10;
@@ -225,17 +256,17 @@ The `examples` directory contains a few more examples:
 
 ### Module API
 ``` javascript
-var threads_a_gogo= require('threads_a_gogo');
+var tagg= require('threads_a_gogo');
 ```
 ##### .create()
-`threads_a_gogo.create( /* no arguments */ )` -> thread object
+`tagg.create( /* no arguments */ )` -> thread object
 ##### .createPool( numThreads )
-`threads_a_gogo.createPool( numberOfThreads )` -> threadPool object
+`tagg.createPool( numberOfThreads )` -> threadPool object
 
 ***
 ### Thread API
 ``` javascript
-var thread= threads_a_gogo.create();
+var thread= tagg.create();
 ```
 ##### .id
 `thread.id` -> a sequential thread serial number
@@ -257,7 +288,7 @@ var thread= threads_a_gogo.create();
 ***
 ### Thread pool API
 ``` javascript
-threadPool= threads_a_gogo.createPool( numberOfThreads );
+threadPool= tagg.createPool( numberOfThreads );
 ```
 ##### .load( absolutePath [, cb] )
 `threadPool.load( absolutePath [, cb] )` -> `thread.load( absolutePath [, cb] )` in all the pool's threads.
