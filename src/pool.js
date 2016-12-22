@@ -1,9 +1,11 @@
-(function createPool (n,o,pool,tagg,jobsCtr) {
+
+(function createPool (n) {
   'use strict';
   
   //2011-11, 2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
   //threads_a_gogo pool.js
   
+  var o,pool,tagg,jobsCtr;
 
   function load (path, cb) {
     pool.forEach(function (v,i,o) { v.load(path, cb) });
@@ -11,11 +13,10 @@
   }
 
 
-  function wrap (cb, that) {
-    that= this;
-    return function (err, result) {
+  function wrap (cb) {
+    return function wrapcb (err, result) {
       jobsCtr-= 1;
-      if (cb) cb.call(that, err, result);
+      if (cb) cb.call(this, err, result);
     }
   }
 
@@ -30,11 +31,12 @@
   }
   
   
-  function evalAll (src, cb) {
-    pool.forEach(function (v,i,o) {
+  function evalAll (src, cb, i) {
+    i= pool.length;
+    while (i--) {
       jobsCtr+= 1;
-      v.eval(src, wrap(cb));
-    });
+      pool[i].eval(src, wrap(cb));
+    };
     return o;
   }
 
@@ -50,9 +52,13 @@
   }
 
 
-  function emitAll (t, args) {
+  function emitAll (t, args, i) {
     args= Array.prototype.splice.call(arguments,0);
-    pool.forEach(function (v,i,o) { v.emit.apply(v, args) });
+    i= pool.length;
+    while (i--) {
+      t= pool[i];
+      t.emit.apply(t, args);
+    }
     return o;
   }
 
