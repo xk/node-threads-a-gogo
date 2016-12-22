@@ -5,10 +5,10 @@
   //2011-11, 2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
   //threads_a_gogo pool.js
   
-  var o,pool,tagg,jobsCtr;
+  var o,tagg,jobsCtr;
 
   function load (path, cb) {
-    pool.forEach(function (v,i,o) { v.load(path, cb) });
+    o.pool.forEach(function (v,i,o) { v.load(path, cb) });
     return o;
   }
 
@@ -26,16 +26,16 @@
     TODO esto no es lo que debe ser, no es cuestión de elegir al buen tuntún
 */
     jobsCtr+= 1;
-    pool[rnd(pool.length)].eval(src, wrap(cb));
+    o.pool[rnd(o.pool.length)].eval(src, wrap(cb));
     return o;
   }
   
   
   function evalAll (src, cb, i) {
-    i= pool.length;
+    i= o.pool.length;
     while (i--) {
       jobsCtr+= 1;
-      pool[i].eval(src, wrap(cb));
+      o.pool[i].eval(src, wrap(cb));
     };
     return o;
   }
@@ -46,7 +46,7 @@
     TODO esto no es lo que debe ser, no es cuestión de elegir al buen tuntún
 */
     args= Array.prototype.splice.call(arguments,0);
-    t= pool[rnd(pool.length)];
+    t= o.pool[rnd(o.pool.length)];
     t.emit.apply(t, args);
     return o;
   }
@@ -54,9 +54,9 @@
 
   function emitAll (t, args, i) {
     args= Array.prototype.splice.call(arguments,0);
-    i= pool.length;
+    i= o.pool.length;
     while (i--) {
-      t= pool[i];
+      t= o.pool[i];
       t.emit.apply(t, args);
     }
     return o;
@@ -64,7 +64,7 @@
 
 
   function on (event, cb) {
-    pool.forEach(function (v,i,o) { v.on(event, cb) });
+    o.pool.forEach(function (v,i,o) { v.on(event, cb) });
     return o;
   }
 
@@ -75,14 +75,14 @@
   function destroy (rudeza, sucb, ctr) {
     ctr= 0;
     function micb () {
-      if (++ctr === pool.length) setImmediate(sucb);
+      if (++ctr === o.pool.length) setImmediate(sucb);
     }
     if (typeof sucb !== 'function') sucb= 0;
-    pool.forEach(function (v,i,o) { sucb ? v.destroy(rudeza, micb) : v.destroy(rudeza) });
+    o.pool.forEach(function (v,i,o) { sucb ? v.destroy(rudeza, micb) : v.destroy(rudeza) });
     o.any.eval= o.any.emit= o.all.eval= o.all.emit= o.on= o.load= o.destroy= function err () {
       throw new Error('This thread pool has been destroyed');
     };
-    pool= [];
+    o.pool= [];
   }
 
 
@@ -93,28 +93,29 @@
   
   tagg= this;
   jobsCtr= 0;
-  pool= [];
-  o= {  any: { eval:evalAny, emit:emitAny },
-        all: { eval:evalAll, emit:emitAll },
+  o= {  
+        load:load,
         on:on,
-        totalThreads: function getTotalThreads () { return pool.length },
+        any: { eval:evalAny, emit:emitAny },
+        all: { eval:evalAll, emit:emitAll },
+        totalThreads: function getTotalThreads () { return o.pool.length },
         idleThreads: function getIdleThreads () {
 /*
     TODO esto no es lo que debe ser, espabilao!
 */
-          return pool.length
+          return o.pool.length
         },
         pendingJobs: function getPendingJobs () { return jobsCtr },
-        load:load,
-        destroy:destroy };
+        destroy:destroy,
+        pool: [] };
 
   try {
-    while (n--) pool[n]= tagg.create();
+    while (n--) o.pool[n]= tagg.create();
   }
   catch (e) {
-    if (pool.length) {
-      pool.length-= 1;
-      while (pool.length) pool.pop().destroy(1);
+    if (o.pool.length) {
+      o.pool.length-= 1;
+      while (o.pool.length) o.pool.pop().destroy(1);
     }
     throw e;
   }
