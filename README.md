@@ -38,7 +38,7 @@ Both the event loop and said listeners and callbacks run sequentially in a singl
 ``` javascript
 (function spinForever () {
   process.stdout.write(".");
-  process.nextTick(spinForever);
+  setImmediate(spinForever);
 })();
 ```
 
@@ -53,12 +53,12 @@ function fibo (n) {
 
 (function fiboLoop () {
   process.stdout.write(fibo(35).toString());
-  process.nextTick(fiboLoop);
+  setImmediate(fiboLoop);
 })();
 
 (function spinForever () {
   process.stdout.write(".");
-  process.nextTick(spinForever);
+  setImmediate(spinForever);
 })();
 ```
 
@@ -82,7 +82,7 @@ thread.eval(fibo).eval('fibo(35)', cb);
 
 (function spinForever () {
   process.stdout.write(".");
-  process.nextTick(spinForever);
+  setImmediate(spinForever);
 })();
 ```
 
@@ -110,7 +110,7 @@ threads_a_gogo.create().eval(fibo).eval('fibo(35)', cb);
 
 (function spinForever () {
   process.stdout.write(".");
-  process.nextTick(spinForever);
+  setImmediate(spinForever);
 })();
 ```
 
@@ -133,7 +133,7 @@ threadPool.all.eval('fibo(35)', function cb (err, data) {
 
 (function spinForever () {
   process.stdout.write(".");
-  process.nextTick(spinForever);
+  setImmediate(spinForever);
 })();
 ```
 
@@ -169,7 +169,7 @@ thread.on('theFiboIs', function cb (data) {
 
 (function spinForever () {
   process.stdout.write(".");
-  process.nextTick(spinForever);
+  setImmediate(spinForever);
 })();
 ```
 
@@ -206,7 +206,7 @@ threadPool.on('theFiboIs', function cb (data) {
 
 (function spinForever () {
   process.stdout.write(".");
-  process.nextTick(spinForever);
+  setImmediate(spinForever);
 })();
 ```
 
@@ -274,11 +274,11 @@ threadPool= threads_a_gogo.createPool( numberOfThreads );
 ##### .totalThreads()
 `threadPool.totalThreads()` -> returns the number of threads in this pool: as supplied in `.createPool( number )`
 ##### .idleThreads()
-`threadPool.idleThreads()` -> returns the number of threads in this pool that are currently idle (sleeping)
+`threadPool.idleThreads()` -> returns the number of threads in this pool that are currently idle.
 ##### .pendingJobs()
 `threadPool.pendingJobs()` -> returns the number of jobs pending.
 ##### .destroy( [ rudely ] )
-`threadPool.destroy( [ rudely ] )` -> waits until `pendingJobs()` is zero and then destroys the pool. If `rudely` is truthy, then it doesn't wait for `pendingJobs === 0`.
+`threadPool.destroy( [ rudely ] )` -> if rudely is 0 or falsy the thread will exit when there aren't any more events in its events queue. If rudely it will quit regardless of that. If stuck in a while (1) ; or similar it won't and currently tagg has no way around that. At least not yet. Pull requests are very much welcomed, just so you know.
 
 ***
 ### Global thread API
@@ -295,14 +295,18 @@ Inside every thread .create()d by threads_a_gogo, there's a global `thread` obje
 ##### .removeAllListeners( [eventType] )
 `thread.removeAllListeners( [eventType] )` -> just like `thread.removeAllListeners()` above.
 ##### .nextTick( function )
-`thread.nextTick( function )` -> like `process.nextTick()`, but twice as fast.
+`thread.nextTick( function )` -> like `setImmediate()`, but twice as fast.
 
 ***
-### Global puts
+### Globals in the threads' contexts
 
-Inside every thread .create()d by threads_a_gogo, there's a global `puts`:
+Inside every thread .create()d by threads_a_gogo, there's these globals:
 ##### puts(arg1 [, arg2 ...])
 `puts(arg1 [, arg2 ...])` -> .toString()s and prints its arguments to stdout.
+##### setImmediate(function)
+`setImmediate( function )` -> just an alias for thread.nextTick(function).
+##### thread
+The thread object described above.
 
 ## Rationale
 
