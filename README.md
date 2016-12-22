@@ -14,11 +14,11 @@ From source:
 
     git clone http://github.com/xk/node-threads-a-gogo.git
     cd node-threads-a-gogo
-    #one of:
+    # One of
     node-gyp rebuild
-    #or:
+    # or
     npm install
-    #or:
+    # or
     node-waf configure build install
     # Depending of what wersion of node you've got.
     # THREADS_A_GOGO CURRENTLY (v0.1.8) RUNS ON NODES v0.5.1 TO v0.10.48
@@ -252,41 +252,56 @@ The `examples` directory contains a few more examples:
 * [ex05_pool](https://github.com/xk/node-threads-a-gogo/blob/master/examples/ex05_pool.md): Using the thread pool.
 * [ex06_jason](https://github.com/xk/node-threads-a-gogo/blob/master/examples/ex06_jason.md): Passing complex objects to threads.
 
-## API
-
-### Module API
+## Module API
 ``` javascript
-var tagg= require('threads_a_gogo');
+tagg= require('threads_a_gogo')
+{ create: [Function],
+  createPool: [Function: createPool],
+  version: '0.1.8' }
 ```
-##### .create()
+### .create()
 `tagg.create( /* no arguments */ )` -> thread object
-##### .createPool( numThreads )
+### .createPool( numThreads )
 `tagg.createPool( numberOfThreads )` -> threadPool object
+### .version
+`tagg.version` -> A string with the threads_a_gogo version number.
 
 ***
-### Thread API
+## Thread Object API (the thread object you get in node's main thread)
 ``` javascript
-var thread= tagg.create();
+thread= tagg.create()
+{ load: [Function: load],
+  eval: [Function: eval],
+  emit: [Function: emit],
+  destroy: [Function: destroy],
+  id: 0,
+  version: '0.1.8',
+  on: [Function: on],
+  once: [Function: once],
+  _on: {},
+  removeAllListeners: [Function: removeAllListeners] }
 ```
-##### .id
-`thread.id` -> a sequential thread serial number
-##### .load( absolutePath [, cb] )
-`thread.load( absolutePath [, cb] )` -> reads the file at `absolutePath` and `thread.eval(fileContents, cb)`.
-##### .eval( program [, cb])
+### .id
+`thread.id` -> a sequential thread serial number.
+### .version
+`thread.version` -> A string with the threads_a_gogo version number.
+### .load( absolutePath [, cb] )
+`thread.load( path [, cb] )` -> reads the file at `path` and `thread.eval(fileContents, cb)`.
+### .eval( program [, cb])
 `thread.eval( program [, cb])` -> converts `program.toString()` and eval()s it in the thread's global context, and (if provided) returns the completion value to `cb(err, completionValue)`.
-##### .on( eventType, listener )
+### .on( eventType, listener )
 `thread.on( eventType, listener )` -> registers the listener `listener(data)` for any events of `eventType` that the thread `thread` may emit.
-##### .once( eventType, listener )
+### .once( eventType, listener )
 `thread.once( eventType, listener )` -> like `thread.on()`, but the listener will only be called once.
-##### .removeAllListeners( [eventType] )
+### .removeAllListeners( [eventType] )
 `thread.removeAllListeners( [eventType] )` -> deletes all listeners for all eventTypes. If `eventType` is provided, deletes all listeners only for the event type `eventType`.
-##### .emit( eventType, eventData [, eventData ... ] )
+### .emit( eventType, eventData [, eventData ... ] )
 `thread.emit( eventType, eventData [, eventData ... ] )` -> emit an event of `eventType` with `eventData` inside the thread `thread`. All its arguments are .toString()ed.
-##### .destroy( /* no arguments */ )
+### .destroy( /* no arguments */ )
 `thread.destroy( [0 (nicely) | 1 (rudely)] [, cb])` -> destroys the thread. If the first parameter is 0 ('nicely', the default) the thread will keep running until both its nextTick queue and its pending jobs queue are empty. If it's 1 (rudely) the thread's event loop will exit as soon as possible, regardless. If a callback cb (optional) is provided, it will be called when the thread has been killed and completely destroyed, the cb will receive no arguments and with 'this' pointing to the global object.
 
 ***
-### Thread pool API
+## Thread pool API
 ``` javascript
 threadPool= tagg.createPool( numberOfThreads );
 ```
