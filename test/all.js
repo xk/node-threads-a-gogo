@@ -98,6 +98,6 @@ function cb3 () {
   assert.equal(this, global);
   step('DESTROY CB OK\nEND\n');
   process.stdout.write('THREADS_A_GOGO v'
-               + process.versions.threads_a_gogo
+               + tagg.version
                + ' BASIC FUNCTIONALITY TEST: OK, IT WORKS!\n');
 }

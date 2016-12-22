@@ -159,7 +159,7 @@ void Init (Handle<Object>);
 
 //Globals BEGIN
 
-const char* k_TAGG_VERSION= "0.1.8";
+const char* k_TAGG_VERSION= "0.1.9";
 
 static int DEBUG= 0;
 static bool useLocker;
