@@ -350,7 +350,7 @@ thread (a global) ->
 { id: 0,
   version: '0.1.10',
   on: [Function: on],
-  once: [Function: once],load: [Function: load],
+  once: [Function: once],
   emit: [Function: emit],
   removeAllListeners: [Function: removeAllListeners]
   nextTick: [Function: nextTick],
