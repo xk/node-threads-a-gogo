@@ -26,9 +26,9 @@ using namespace v8;
 #endif
 
 #ifdef TAGG_USE_LIBUV
-  #define WAKEUP_NODES_EVENT_LOOP uv_async_send(&thread->async_watcher);
+  #define WAKEUP_NODE_EVENT_LOOP uv_async_send(&thread->async_watcher);
 #else
-  #define WAKEUP_NODES_EVENT_LOOP ev_async_send(EV_DEFAULT_UC_ &thread->async_watcher);
+  #define WAKEUP_NODE_EVENT_LOOP ev_async_send(EV_DEFAULT_UC_ &thread->async_watcher);
 #endif
 
 //Macros END
@@ -44,26 +44,26 @@ typedef enum eventTypes {
 
 struct emitStruct {
   int argc;
-  String::Utf8Value** argv;
-  String::Utf8Value* eventName;
+  char** argv;
+  char* eventName;
 };
 
 struct evalStruct {
   int error;
   int hasCallback;
-  String::Utf8Value* resultado;
-  String::Utf8Value* scriptText;
+  char* resultado;
+  char* scriptText;
 };
 
 struct loadStruct {
   int error;
   int hasCallback;
-  String::Utf8Value* path;
+  char* path;
 };
 
 struct eventsQueueItem {
-  eventsQueueItem* next;
   int eventType;
+  eventsQueueItem* next;
   Persistent<Object> callback;
   union {
     emitStruct emit;
@@ -99,6 +99,7 @@ typedef struct typeThread {
   volatile int IDLE;
   volatile int ended;
   volatile int sigkill;
+  volatile int destroyed;
   int hasDestroyCallback;
   int hasIdleEventsListener;
   unsigned long threadMagicCookie;
@@ -110,7 +111,6 @@ typedef struct typeThread {
   pthread_mutex_t idle_mutex;
   
   Isolate* isolate;
-  Persistent<Context> context;
   Persistent<Object> nodeObject;
   Persistent<Object> nodeDispatchEvents;
   Persistent<Object> destroyCallback;
@@ -132,9 +132,10 @@ static eventsQueueItem* qitemStorePull (void);
 static eventsQueue* qitemStoreInit (void);
 static void destroyQueue (eventsQueue*);
 static typeThread* isAThread (Handle<Object>);
-static void wakeUpThread (typeThread*);
+static void wakeUpThread (typeThread*, int);
 static Handle<Value> Puts (const Arguments &);
 static void* threadBootProc (void*);
+static inline char* o2cstr (Handle<Value>);
 static void eventLoop (typeThread*);
 static void notifyIdle (typeThread*);
 static void cleanUpAfterThread (typeThread*);
@@ -159,9 +160,9 @@ void Init (Handle<Object>);
 
 //Globals BEGIN
 
-const char* k_TAGG_VERSION= "0.1.9";
+const char* k_TAGG_VERSION= "0.1.10";
 
-static int DEBUG= 0;
+static int TAGG_DEBUG= 0;
 static bool useLocker;
 static long int threadsCtr= 0;
 static Persistent<Object> boot_js;
@@ -208,7 +209,7 @@ static inline void beep (void) {
 
 //Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
-  DEBUG && printf("Q_PUSH\n");
+  TAGG_DEBUG && printf("Q_PUSH\n");
   qitem->next= NULL;
   assert(queue->pushPtr != NULL);
   assert(queue->pushPtr->next == NULL);
@@ -224,7 +225,7 @@ static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
 
 //Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline eventsQueueItem* qPull (eventsQueue* queue) {
-  DEBUG && printf("Q_PULL\n");
+  TAGG_DEBUG && printf("Q_PULL\n");
   eventsQueueItem* qitem= queue->pullPtr;
   assert(queue->pullPtr != NULL);
   while (!qitem->eventType && qitem->next) {
@@ -242,7 +243,7 @@ static inline eventsQueueItem* qPull (eventsQueue* queue) {
 
 //Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline eventsQueueItem* qUsed (eventsQueue* queue) {
-  DEBUG && printf("Q_USED\n");
+  TAGG_DEBUG && printf("Q_USED\n");
   eventsQueueItem* qitem= NULL;
   assert(queue->first != NULL);
   assert(queue->pullPtr != NULL);
@@ -263,7 +264,7 @@ static inline eventsQueueItem* qUsed (eventsQueue* queue) {
 
 //Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline eventsQueueItem* nuQitem (eventsQueue* queue) {
-  DEBUG && printf("Q_NU_Q_ITEM\n");
+  TAGG_DEBUG && printf("Q_NU_Q_ITEM\n");
   eventsQueueItem* qitem= NULL;
   if (queue) qitem= qUsed(queue);
   if (!qitem) {
@@ -283,7 +284,7 @@ static inline eventsQueueItem* nuQitem (eventsQueue* queue) {
 
 //Sólo se debe usar en main/node's thread !
 static eventsQueue* nuQueue (void) {
-  DEBUG && printf("Q_NU_QUEUE\n");
+  TAGG_DEBUG && printf("Q_NU_QUEUE\n");
   eventsQueue* queue= (eventsQueue*) calloc(1, sizeof(eventsQueue));
   eventsQueueItem* qitem= qitemStorePull();
   if (!qitem) qitem= nuQitem(NULL);
@@ -308,7 +309,7 @@ static eventsQueue* nuQueue (void) {
 
 //Sólo se debe usar en main/node's thread !
 static void qitemStorePush (eventsQueueItem* qitem) {
-  DEBUG && printf("Q_ITEM_STORE_PUSH\n");
+  TAGG_DEBUG && printf("Q_ITEM_STORE_PUSH\n");
   qitem->next= NULL;
   assert(qitemStore->last != NULL);
   assert(qitemStore->last->next == NULL);
@@ -324,7 +325,7 @@ static void qitemStorePush (eventsQueueItem* qitem) {
 
 //Sólo se debe usar en main/node's thread !
 static eventsQueueItem* qitemStorePull (void) {
-  DEBUG && printf("Q_ITEM_STORE_PULL\n");
+  TAGG_DEBUG && printf("Q_ITEM_STORE_PULL\n");
   eventsQueueItem* qitem= NULL;
   assert(qitemStore->first != NULL);
   assert(qitemStore->last != NULL);
@@ -344,7 +345,7 @@ static eventsQueueItem* qitemStorePull (void) {
 
 //Sólo se debe usar en main/node's thread !
 static eventsQueue* qitemStoreInit (void) {
-  DEBUG && printf("Q_ITEM_STORE_INIT\n");
+  TAGG_DEBUG && printf("Q_ITEM_STORE_INIT\n");
   eventsQueue* queue= (eventsQueue*) calloc(1, sizeof(eventsQueue));
   eventsQueueItem* qitem= queue->first= (eventsQueueItem*) calloc(1, sizeof(eventsQueueItem));
   int i= 2048;
@@ -364,7 +365,7 @@ static eventsQueue* qitemStoreInit (void) {
 
 //Sólo se debe usar en main/node's thread !
 static void destroyQueue (eventsQueue* queue) {
-  DEBUG && printf("Q_DESTROY_QUEUE\n");
+  TAGG_DEBUG && printf("Q_DESTROY_QUEUE\n");
   eventsQueueItem* qitem;
   assert(queue->first != NULL);
   while (queue->first) {
@@ -403,27 +404,31 @@ static typeThread* isAThread (Handle<Object> receiver) {
 
 
 //Se encarga de poner en marcha la thread si es que estaba durmiendo
-static void wakeUpThread (typeThread* thread) {
+static void wakeUpThread (typeThread* thread, int sigkill) {
 
 //Esto se ejecuta siempre en node's main thread
 
-  DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #1\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld wakeUpThread(sigkill=%d) #1\n", thread->id, sigkill);
   
   //Cogiendo este lock sabemos que la thread o no ha salido aún
   //del event loop o está parada en wait/sleep/idle
   pthread_mutex_lock(&thread->idle_mutex);
   
-  DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #2\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld wakeUpThread(sigkill=%d) #2\n", thread->id, sigkill);
   //Estamos seguros de que no se está tocando thread->IDLE
   //xq tenemos el lock nosotros y sólo se toca con el lock puesto
+  
+  //Es un error volver llamar a esto después de un sigkill
+  assert(!thread->sigkill);
+  thread->sigkill= sigkill;
   if (thread->IDLE) {
     //estaba parada, hay que ponerla en marcha
-    DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #3\n", thread->id);
+    TAGG_DEBUG && printf("THREAD %ld wakeUpThread(sigkill=%d) #3\n", thread->id, sigkill);
     pthread_cond_signal(&thread->idle_cv);
   }
   //Hay que volver a soltar el lock
   pthread_mutex_unlock(&thread->idle_mutex);
-  DEBUG && printf("THREAD %ld PUSH JOB TO THREAD #5 EXIT\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld wakeUpThread(sigkill=%d) #5 EXIT\n", thread->id, sigkill);
 }
 
 
@@ -462,13 +467,13 @@ static void* threadBootProc (void* arg) {
   
   typeThread* thread= (typeThread*) arg;
   
-  DEBUG && printf("THREAD %ld BOOT ENTER\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld BOOT ENTER\n", thread->id);
   
   thread->isolate= Isolate::New();
   thread->isolate->SetData(thread);
   
   if (useLocker) {
-    //DEBUG && printf("**** USING LOCKER: YES\n");
+    //TAGG_DEBUG && printf("**** USING LOCKER: YES\n");
     v8::Locker myLocker(thread->isolate);
     //v8::Isolate::Scope isolate_scope(thread->isolate);
     eventLoop(thread);
@@ -477,16 +482,32 @@ static void* threadBootProc (void* arg) {
     eventLoop(thread);
   }
   
-  DEBUG && printf("THREAD %ld BOOT EXIT #1\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld BOOT EXIT #1\n", thread->id);
   thread->isolate->Exit();
-  DEBUG && printf("THREAD %ld BOOT EXIT #2\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld BOOT EXIT #2\n", thread->id);
   thread->isolate->Dispose();
-  DEBUG && printf("THREAD %ld BOOT EXIT #3\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld BOOT EXIT #3\n", thread->id);
   thread->ended= 1;
-  DEBUG && printf("THREAD %ld BOOT EXIT #4 WAKEUP_NODES_EVENT_LOOP\n", thread->id);
-  WAKEUP_NODES_EVENT_LOOP
-  DEBUG && printf("THREAD %ld BOOT EXIT #5 ENDED\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld BOOT EXIT #4 WAKEUP_NODE_EVENT_LOOP\n", thread->id);
+  WAKEUP_NODE_EVENT_LOOP
+  TAGG_DEBUG && printf("THREAD %ld BOOT EXIT #5 ENDED\n", thread->id);
   return 0;
+}
+
+
+
+
+
+
+
+
+static inline char* o2cstr (Handle<Value> o) {
+  String::Utf8Value utf8(o);
+  long len= utf8.length();
+  char* r= (char*) malloc( (len + 1) * sizeof(char));
+  memcpy(r, *utf8, len);
+  r[len]= 0;
+  return r;
 }
 
 
@@ -498,14 +519,15 @@ static void* threadBootProc (void* arg) {
 
 // The thread's eventloop runs in the thread(s) not in node's main thread
 static void eventLoop (typeThread* thread) {
-  DEBUG && printf("THREAD %ld EVENTLOOP ENTER\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld EVENTLOOP ENTER\n", thread->id);
 
   thread->isolate->Enter();
-  thread->context= Context::New();
-  thread->context->Enter();
+  Persistent<Context> context= Context::New();
+  context->Enter();
   
   HandleScope scope1;
-  Local<Object> global= thread->context->Global();
+  
+  Local<Object> global= context->Global();
   global->Set(String::New("puts"), FunctionTemplate::New(Puts)->GetFunction());
   Local<Object> threadObject= Object::New();
   threadObject->Set(String::New("id"), Number::New(thread->id));
@@ -525,28 +547,29 @@ static void eventLoop (typeThread* thread) {
       eventsQueueItem *event, *qitem3;
       TryCatch onError;
         
-      DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
-        
+      TAGG_DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
+
       while (1) {
           
-          DEBUG && printf("THREAD %ld WHILE\n", thread->id);
+          TAGG_DEBUG && printf("THREAD %ld WHILE\n", thread->id);
           
           if (thread->sigkill == kKillRudely) break;
           else if (qitem || (qitem= qPull(thread->threadEventsQueue))) {
           
             event= qitem;
             qitem= NULL;
-            DEBUG && printf("THREAD %ld QITEM\n", thread->id);
+            TAGG_DEBUG && printf("THREAD %ld QITEM\n", thread->id);
             if (event->eventType == eventTypeLoad) {
               HandleScope scope;
               
               Local<Script> script;
               Local<Value> resultado;
               
-              DEBUG && printf("THREAD %ld QITEM LOAD\n", thread->id);
+              TAGG_DEBUG && printf("THREAD %ld QITEM LOAD\n", thread->id);
               
               char* buf= NULL;
-              FILE* fp= fopen(**(event->load.path), "rb");
+              FILE* fp= fopen(event->load.path, "rb");
+              
               if (fp) {
                 fseek(fp, 0, SEEK_END);
                 long len= ftell(fp);
@@ -555,7 +578,7 @@ static void eventLoop (typeThread* thread) {
                 fread(buf, len, 1, fp);
                 fclose(fp);
               }
-              delete event->load.path;
+              
               if (buf != NULL) {
                 script= Script::Compile(String::New(buf));
                 free(buf);
@@ -571,13 +594,14 @@ static void eventLoop (typeThread* thread) {
                 memcpy(qitem3, event, sizeof(eventsQueueItem));
                 qitem3->eventType= eventTypeEval;
                 qitem3->eval.error= event->load.error;
-                qitem3->eval.resultado= new String::Utf8Value(qitem3->eval.error ? onError.Exception() : resultado);
+                qitem3->eval.resultado= o2cstr(qitem3->eval.error ? onError.Exception() : resultado);
                 qPush(qitem3, thread->processEventsQueue);
-                WAKEUP_NODES_EVENT_LOOP
+                WAKEUP_NODE_EVENT_LOOP
               }
               
               if (onError.HasCaught()) onError.Reset();
               
+              free(event->load.path);
               event->eventType= eventTypeNone;
             }
             else if (event->eventType == eventTypeEval) {
@@ -585,15 +609,12 @@ static void eventLoop (typeThread* thread) {
               
               Local<Script> script;
               Local<String> source;
-              String::Utf8Value* str;
               Local<Value> resultado;
               
-              DEBUG && printf("THREAD %ld QITEM EVAL\n", thread->id);
+              TAGG_DEBUG && printf("THREAD %ld QITEM EVAL\n", thread->id);
               
-              str= event->eval.scriptText;
-              source= String::New(**str, (*str).length());
+              source= String::New(event->eval.scriptText);
               script= Script::New(source);
-              delete str;
             
               if (!onError.HasCaught()) resultado= script->Run();
 
@@ -601,39 +622,35 @@ static void eventLoop (typeThread* thread) {
                 qitem3= nuQitem(thread->processEventsQueue);
                 memcpy(qitem3, event, sizeof(eventsQueueItem));
                 qitem3->eval.error= onError.HasCaught() ? 1 : 0;
-                qitem3->eval.resultado= new String::Utf8Value(qitem3->eval.error ? onError.Exception() : resultado);
+                qitem3->eval.resultado= o2cstr( qitem3->eval.error ? onError.Exception() : resultado );
                 qPush(qitem3, thread->processEventsQueue);
-                WAKEUP_NODES_EVENT_LOOP
+                WAKEUP_NODE_EVENT_LOOP
               }
               
               if (onError.HasCaught()) onError.Reset();
               
+              free(event->eval.scriptText);
               event->eventType= eventTypeNone;
             }
             else if (event->eventType == eventTypeEmit) {
               HandleScope scope;
-            
-              Local<Value> args[2];
-              String::Utf8Value* str;
               
-              DEBUG && printf("THREAD %ld QITEM EVENT\n", thread->id);
-              
-              str= event->emit.eventName;
-              args[0]= String::New(**str, (*str).length());
-              delete str;
-            
               Local<Array> array= Array::New(event->emit.argc);
+              Local<Value> args[2];
+              
+              TAGG_DEBUG && printf("THREAD %ld QITEM EVENT\n", thread->id);
+              
+              args[0]= String::New(event->emit.eventName);
               args[1]= array;
-            
               int i= 0;
               while (i < event->emit.argc) {
-                str= event->emit.argv[i];
-                array->Set(i, String::New(**str, (*str).length()));
-                delete str;
+                array->Set(i, String::New(event->emit.argv[i]));
+                free(event->emit.argv[i]);
                 i++;
               }
-            
+              
               free(event->emit.argv);
+              free(event->emit.eventName);
               dev->CallAsFunction(global, 2, args);
               event->eventType= eventTypeNone;
             }
@@ -642,19 +659,19 @@ static void eventLoop (typeThread* thread) {
             }
           }
           else
-            DEBUG && printf("THREAD %ld NO QITEM\n", thread->id);
+            TAGG_DEBUG && printf("THREAD %ld NO QITEM\n", thread->id);
 
           if (thread->sigkill == kKillRudely) break;
           else {
             HandleScope scope;
-            DEBUG && printf("THREAD %ld NTQL\n", thread->id);
+            TAGG_DEBUG && printf("THREAD %ld NTQL\n", thread->id);
             ntql= dnt->CallAsFunction(global, 0, NULL)->ToNumber()->Value();
             if (onError.HasCaught()) onError.Reset();
           }
           
           if (thread->sigkill == kKillRudely) break;
           else if (!ntql && !(qitem || (qitem= qPull(thread->threadEventsQueue)))) {
-            DEBUG && printf("THREAD %ld EXIT WHILE: NO NTQL AND NO QITEM\n", thread->id);
+            TAGG_DEBUG && printf("THREAD %ld EXIT WHILE: NO NTQL AND NO QITEM\n", thread->id);
             break;
           }
           
@@ -664,14 +681,14 @@ static void eventLoop (typeThread* thread) {
 
       V8::IdleNotification();
       
-      DEBUG && printf("THREAD %ld BEFORE MUTEX\n", thread->id);
+      TAGG_DEBUG && printf("THREAD %ld BEFORE MUTEX\n", thread->id);
       //cogemos el lock para
       //por un lado poder mirar si hay cosas en la queue sabiendo
       //que nadie la está tocando
       //y por otro lado para poder tocar thread->IDLE sabiendo
       //que nadie la está mirando mientras la tocamos.
       pthread_mutex_lock(&thread->idle_mutex);
-      DEBUG && printf("THREAD %ld TIENE threadEventsQueue_MUTEX\n", thread->id);
+      TAGG_DEBUG && printf("THREAD %ld TIENE threadEventsQueue_MUTEX\n", thread->id);
       //aquí tenemos acceso exclusivo a threadEventsQueue y a thread->IDLE
       while (!(qitem || (qitem= qPull(thread->threadEventsQueue))) && !thread->sigkill) {
         //sólo se entra aquí si no hay nada en la queue y no hay sigkill
@@ -679,7 +696,7 @@ static void eventLoop (typeThread* thread) {
         // para que sepan que nos han de despertar
         thread->IDLE= 1;
         if (thread->hasIdleEventsListener) notifyIdle(thread);
-        DEBUG && printf("THREAD %ld SLEEP\n", thread->id);
+        TAGG_DEBUG && printf("THREAD %ld SLEEP\n", thread->id);
         //en pthread_cond_wait se quedará atascada esta thread hasta que
         //nos despierten y haya cosas en la queue o haya sigkill
         //El lock se abre al entrar en pthread_cond_wait así que los
@@ -690,15 +707,15 @@ static void eventLoop (typeThread* thread) {
       }
       //Aquí aún tenemos el lock así que podemos tocar thread->IDLE con seguridad
       thread->IDLE= 0;
-      DEBUG && printf("THREAD %ld WAKE UP\n", thread->id);
+      TAGG_DEBUG && printf("THREAD %ld WAKE UP\n", thread->id);
       //lo soltamos
       pthread_mutex_unlock(&thread->idle_mutex);
-      DEBUG && printf("THREAD %ld SUELTA threadEventsQueue_mutex\n", thread->id);
+      TAGG_DEBUG && printf("THREAD %ld SUELTA threadEventsQueue_mutex\n", thread->id);
       
     }
 
-  thread->context.Dispose();
-  DEBUG && printf("THREAD %ld EVENTLOOP EXIT\n", thread->id);
+  context.Dispose();
+  TAGG_DEBUG && printf("THREAD %ld EVENTLOOP EXIT\n", thread->id);
 }
 
 
@@ -723,10 +740,11 @@ static void notifyIdle (typeThread* thread) {
 static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
   HandleScope scope;
   typeThread* thread= (typeThread*) arg;
-  DEBUG && printf("THREAD %ld cleanUpAfterThreadCallback()\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThreadCallback()\n", thread->id);
   if (thread->hasDestroyCallback) {
     thread->destroyCallback->CallAsFunction(Context::GetCurrent()->Global(), 0, NULL);
-  } 
+  }
+  thread->destroyCallback.Dispose();
   free(thread);
 }
 
@@ -740,10 +758,10 @@ static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
 //Deshacerse de todo, lo que se pueda guardar se guarda para reutilizarlo
 static void cleanUpAfterThread (typeThread* thread) {
   
-  DEBUG && printf("THREAD %ld cleanUpAfterThread() IN MAIN THREAD #1\n", thread->id);
-  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->threadEventsQueue)\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() IN MAIN THREAD #1\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->threadEventsQueue)\n", thread->id);
   destroyQueue(thread->threadEventsQueue);
-  DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->processEventsQueue)\n", thread->id);
+  TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->processEventsQueue)\n", thread->id);
   destroyQueue(thread->processEventsQueue);
   
   pthread_cond_destroy(&(thread->idle_cv));
@@ -756,7 +774,7 @@ static void cleanUpAfterThread (typeThread* thread) {
     // hay que apagar uv antes de poder hacer free(thread)
     // De hecho el free(thread) se hará en una Callabck xq uv_close la va a llamar
     
-    DEBUG && printf("THREAD %ld cleanUpAfterThread() FREE IN UV CALLBACK #2\n", thread->id);
+    TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() FREE IN UV CALLBACK #2\n", thread->id);
     
 #ifdef TAGG_USE_LIBUV
     uv_close((uv_handle_t*) &thread->async_watcher, cleanUpAfterThreadCallback);
@@ -771,7 +789,7 @@ static void cleanUpAfterThread (typeThread* thread) {
   else {
     //Esta thread nunca ha llegado a arrancar
     //Seguramente venimos de un error en thread.create())
-    DEBUG && printf("THREAD %ld cleanUpAfterThread() FREE HERE #3\n", thread->id);
+    TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() FREE HERE #3\n", thread->id);
     free(thread);
   }
 }
@@ -799,43 +817,39 @@ static void Callback (
   eventsQueueItem* event;
   typeThread* thread= (typeThread*) watcher;
   
-  if (thread->ended) {
-    DEBUG && printf("THREAD %ld CALLBACK CALLED cleanUpAfterThread()\n", thread->id);
-    //pthread_cancel(thread->thread);
-    cleanUpAfterThread(thread);
-    return;
-  }
-  
   Local<Array> array;
   Local<Value> args[2];
-  String::Utf8Value* str;
   Local<Value> null= Local<Value>::New(Null());
+  
+  assert(thread != NULL);
+  assert(!thread->destroyed);
   
   TryCatch onError;
   while ((event= qPull(thread->processEventsQueue))) {
   
-    DEBUG && printf("CALLBACK %ld IN MAIN THREAD\n", thread->id);
+    TAGG_DEBUG && printf("CALLBACK %ld IN MAIN THREAD\n", thread->id);
+
+    assert(event != NULL);
 
     if (event->eventType == eventTypeEval) {
     
-      DEBUG && printf("CALLBACK eventTypeEval IN MAIN THREAD\n");
+      TAGG_DEBUG && printf("CALLBACK eventTypeEval IN MAIN THREAD\n");
       
-      if (event->eval.hasCallback) {
+      assert(event->eval.hasCallback);
+      assert(event->eval.resultado != NULL);
       
-        str= event->eval.resultado;
-
-        if (event->eval.error) {
-          args[0]= Exception::Error(String::New(**str, (*str).length()));
-          args[1]= null;
-        } else {
-          args[0]= null;
-          args[1]= String::New(**str, (*str).length());
-        }
-        event->callback->CallAsFunction(thread->nodeObject, 2, args);
-        event->callback.Dispose();
-        delete event->eval.resultado;
+      if (event->eval.error) {
+        args[0]= Exception::Error(String::New(event->eval.resultado));
+        args[1]= null;
       }
-
+      else {
+        args[0]= null;
+        args[1]= String::New(event->eval.resultado);
+      }
+      event->callback->CallAsFunction(thread->nodeObject, 2, args);
+      
+      event->callback.Dispose();
+      free(event->eval.resultado);
       event->eventType = eventTypeNone;
       
       if (onError.HasCaught()) {
@@ -845,31 +859,37 @@ static void Callback (
     }
     else if (event->eventType == eventTypeEmit) {
     
-      DEBUG && printf("CALLBACK eventTypeEmit IN MAIN THREAD\n");
-      //fprintf(stdout, "*** Callback\n");
+      TAGG_DEBUG && printf("CALLBACK eventTypeEmit IN MAIN THREAD\n");
       
-      str= event->emit.eventName;
-      args[0]= String::New(**str, (*str).length());
-      delete event->emit.eventName;
+      args[0]= String::New(event->emit.eventName);
       array= Array::New(event->emit.argc);
       args[1]= array;
       
       if (event->emit.argc) {
         int i= 0;
-        do {
-          str= event->emit.argv[i];
-          array->Set(i, String::New(**str, (*str).length()));
-          delete event->emit.argv[i];
-        } while (++i < event->emit.argc);
+        while (i < event->emit.argc) {
+          array->Set(i, String::New(event->emit.argv[i]));
+          free(event->emit.argv[i]);
+          i++;
+        }
         free(event->emit.argv);
       }
 
       thread->nodeDispatchEvents->CallAsFunction(Context::GetCurrent()->Global(), 2, args);
+      
+      free(event->emit.eventName);
       event->eventType = eventTypeNone;
     }
     else {
       assert(0);
     }
+  }
+  
+  if (thread->sigkill && thread->ended) {
+    TAGG_DEBUG && printf("THREAD %ld CALLBACK CALLED cleanUpAfterThread()\n", thread->id);
+    //pthread_cancel(thread->thread);
+    thread->destroyed= 1;
+    cleanUpAfterThread(thread);
   }
 }
 
@@ -900,9 +920,9 @@ static Handle<Value> Destroy (const Arguments &args) {
     return ThrowException(Exception::TypeError(String::New("thread.destroy(): the receiver must be a thread object")));
   }
   
-  int arg= kKillNicely;
+  int nuSigkill= kKillNicely;
   if (args.Length()) {
-    arg= args[0]->ToNumber()->Value() ? kKillRudely : kKillNicely;
+    nuSigkill= args[0]->ToNumber()->Value() ? kKillRudely : kKillNicely;
   }
   
   thread->hasDestroyCallback= (args.Length() > 1) && (args[1]->IsFunction());
@@ -910,18 +930,12 @@ static Handle<Value> Destroy (const Arguments &args) {
     thread->destroyCallback= Persistent<Object>::New(args[1]->ToObject());
   }
   
-  const char* str= arg == kKillNicely ? "NICELY" : "RUDELY";
-  DEBUG && printf("THREAD %ld DESTROY(%s) #1\n", thread->id, str);
-  pthread_mutex_lock(&thread->idle_mutex);
-  DEBUG && printf("THREAD %ld DESTROY(%s) #2\n", thread->id, str);
-  thread->sigkill= arg;
-  if (thread->IDLE) {
-    DEBUG && printf("THREAD %ld DESTROY(%s) #3\n", thread->id, str);
-    pthread_cond_signal(&thread->idle_cv);
+  if (TAGG_DEBUG) {
+    const char* str= (nuSigkill == kKillNicely ? "NICELY" : "RUDELY");
+    printf("THREAD %ld DESTROY(%s) #1\n", thread->id, str);
   }
-  pthread_mutex_unlock(&thread->idle_mutex);
-  DEBUG && printf("THREAD %ld DESTROY(%s) #4 EXIT\n", thread->id, str);
-
+  
+  wakeUpThread(thread, nuSigkill);
   return Undefined();
 }
 
@@ -950,10 +964,10 @@ static Handle<Value> Eval (const Arguments &args) {
   if (event->eval.hasCallback) {
     event->callback= Persistent<Object>::New(args[1]->ToObject());
   }
-  event->eval.scriptText= new String::Utf8Value(args[0]);
+  event->eval.scriptText= o2cstr(args[0]);
   event->eventType= eventTypeEval;
   qPush(event, thread->threadEventsQueue);
-  wakeUpThread(thread);
+  wakeUpThread(thread, thread->sigkill);
   return args.This();
 }
 
@@ -979,13 +993,13 @@ static Handle<Value> Load (const Arguments &args) {
   
   eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
   event->eventType= eventTypeLoad;
-  event->load.path= new String::Utf8Value(args[0]);
+  event->load.path= o2cstr(args[0]);
   event->load.hasCallback= ((args.Length() > 1) && (args[1]->IsFunction()));
   if (event->load.hasCallback) {
     event->callback= Persistent<Object>::New(args[1]->ToObject());
   }
   qPush(event, thread->threadEventsQueue);
-  wakeUpThread(thread);
+  wakeUpThread(thread, thread->sigkill);
   return args.This();
 }
 
@@ -1000,15 +1014,15 @@ static Handle<Value> Load (const Arguments &args) {
 static inline void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
   eventsQueueItem* event= nuQitem(queue);
   event->eventType= eventTypeEmit;
-  event->emit.eventName= new String::Utf8Value(args[0]);
+  event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
   if (event->emit.argc) {
-    event->emit.argc= args.Length()- 1;
-    event->emit.argv= (String::Utf8Value**) malloc(event->emit.argc * sizeof(void*));
+    event->emit.argv= (char**) malloc(event->emit.argc * sizeof(char*));
     int i= 0;
-    do {
-      event->emit.argv[i]= new String::Utf8Value(args[i+1]);
-    } while (++i < event->emit.argc);
+    while (i < event->emit.argc) {
+      event->emit.argv[i]= o2cstr(args[i+1]);
+      i++;
+    }
   }
   qPush(event, queue);
 }
@@ -1028,18 +1042,18 @@ static Handle<Value> processEmit (const Arguments &args) {
   }
   eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
   event->eventType= eventTypeEmit;
-  event->emit.eventName= new String::Utf8Value(args[0]);
+  event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
   if (event->emit.argc) {
-    event->emit.argc= args.Length()- 1;
-    event->emit.argv= (String::Utf8Value**) malloc(event->emit.argc * sizeof(void*));
+    event->emit.argv= (char**) malloc(event->emit.argc * sizeof(char*));
     int i= 0;
-    do {
-      event->emit.argv[i]= new String::Utf8Value(args[i+1]);
-    } while (++i < event->emit.argc);
+    while (i < event->emit.argc) {
+      event->emit.argv[i]= o2cstr(args[i+1]);
+      i++;
+    }
   }
   qPush(event, thread->threadEventsQueue);
-  wakeUpThread(thread);
+  wakeUpThread(thread, thread->sigkill);
   return args.This();
 }
 
@@ -1055,18 +1069,18 @@ static Handle<Value> threadEmit (const Arguments &args) {
   typeThread* thread= (typeThread*) Isolate::GetCurrent()->GetData();
   eventsQueueItem* event= nuQitem(thread->processEventsQueue);
   event->eventType= eventTypeEmit;
-  event->emit.eventName= new String::Utf8Value(args[0]);
+  event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
   if (event->emit.argc) {
-    event->emit.argc= args.Length()- 1;
-    event->emit.argv= (String::Utf8Value**) malloc(event->emit.argc * sizeof(void*));
+    event->emit.argv= (char**) malloc(event->emit.argc * sizeof(char*));
     int i= 0;
-    do {
-      event->emit.argv[i]= new String::Utf8Value(args[i+1]);
-    } while (++i < event->emit.argc);
+    while (i < event->emit.argc) {
+      event->emit.argv[i]= o2cstr(args[i+1]);
+      i++;
+    }
   }
   qPush(event, thread->processEventsQueue);
-  WAKEUP_NODES_EVENT_LOOP
+  WAKEUP_NODE_EVENT_LOOP
   return args.This();
 }
 
@@ -1109,7 +1123,7 @@ static Handle<Value> Create (const Arguments &args) {
     if (err) {
       //Algo ha ido mal, toca deshacer todo
       printf("THREAD %ld PTHREAD_CREATE() ERROR %d : %s NOT RETRYING ANY MORE\n", thread->id, err, errstr);
-      DEBUG && printf("CALLED cleanUpAfterThread %ld FROM CREATE()\n", thread->id);
+      TAGG_DEBUG && printf("CALLED cleanUpAfterThread %ld FROM CREATE()\n", thread->id);
       cleanUpAfterThread(thread);
       return ThrowException(Exception::TypeError(String::New("create(): error in pthread_create()")));
     }

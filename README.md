@@ -1,5 +1,8 @@
 [![build status](https://travis-ci.org/xk/node-threads-a-gogo.svg?branch=SYNC)](https://travis-ci.org/xk/node-threads-a-gogo)
 [![npm version](https://badge.fury.io/js/threads_a_gogo.svg)](https://www.npmjs.com/package/threads_a_gogo)
+
+***
+
 # TAGG: Threads à gogo for Node.js
 
 Threads à gogo ([*](http://en.wikipedia.org/wiki/%C3%80_gogo)) is a native module for Node.js that provides an asynchronous, evented and/or continuation passing style API for moving blocking/longish CPU-bound tasks out of Node's event loop to JavaScript threads that run in parallel in the background and that use all the available CPU cores automatically; all from within **a single Node** process.
@@ -21,7 +24,7 @@ From source:
     # or
     node-waf configure build install
     # Depending of what wersion of node you've got.
-    # THREADS_A_GOGO CURRENTLY (v0.1.9) RUNS ON NODES v0.5.1 TO v0.10.48
+    # THREADS_A_GOGO CURRENTLY (v0.1.10) RUNS ON NODES v0.5.1 TO v0.10.48
 
 Basic functionality test:
 
@@ -39,7 +42,7 @@ Basic functionality test:
     27.OK.WAITING FOR DESTROY CB
     28.OK.29.DESTROY CB OK
     END
-    THREADS_A_GOGO v0.1.9 BASIC FUNCTIONALITY TEST: OK, IT WORKS!
+    THREADS_A_GOGO v0.1.10 BASIC FUNCTIONALITY TEST: OK, IT WORKS!
 
 To include the module in your project:
 
@@ -253,13 +256,14 @@ The `examples` directory contains a few more examples:
 * [ex06_jason](https://github.com/xk/node-threads-a-gogo/blob/master/examples/ex06_jason.md): Passing complex objects to threads.
 
 ## Module API
+
 ## TAGG Object API
 ``` javascript
 tagg= require('threads_a_gogo') -> tagg object
 
 { create: [Function],
   createPool: [Function: createPool],
-  version: '0.1.9' }
+  version: '0.1.10' }
   
 ```
 ### .create()
@@ -272,6 +276,7 @@ tagg= require('threads_a_gogo') -> tagg object
 `tagg.version` -> A string with the threads_a_gogo version number.
 
 ***
+
 ## Thread Object API (this is the thread object you get in node's main thread)
 ``` javascript
 thread= tagg.create() -> thread object
@@ -281,7 +286,7 @@ thread= tagg.create() -> thread object
   emit: [Function: emit],
   destroy: [Function: destroy],
   id: 0,
-  version: '0.1.9',
+  version: '0.1.10',
   on: [Function: on],
   once: [Function: once],
   _on: {},
@@ -333,7 +338,9 @@ Destroys the thread. If the first parameter is not provided or falsy or 0 (the d
 
 ### _on
 Ignore, don't touch that. The `_on` object holds the event listeners.
+
 ***
+
 ## Thread object API (this is the thread object that exists not in node but as a global in every thread)
 
 Inside every thread .create()d by threads_a_gogo, there's a global `thread` object with these properties:
@@ -341,7 +348,7 @@ Inside every thread .create()d by threads_a_gogo, there's a global `thread` obje
 thread (a global) ->
 
 { id: 0,
-  version: '0.1.9',
+  version: '0.1.10',
   on: [Function: on],
   once: [Function: once],load: [Function: load],
   emit: [Function: emit],
@@ -389,6 +396,7 @@ Ignore, don't touch that. The `_on` object holds the event listeners.
 Ignore, don't touch that. The `_ntq` array holds the nextTick()ed and/or setImmediate()d funcitons.
 
 ***
+
 ## Globals in the threads' js contexts
 
 Inside every thread .create()d by threads_a_gogo, on top of the usual javascript ones there's these other globals:
@@ -407,6 +415,7 @@ Just an alias for `thread.nextTick(function)`.
 The thread object described above is also a global.
 
 ***
+
 ## Thread pool API
 ``` javascript
 pool= tagg.createPool( numbreOfThreads ) ->
@@ -429,7 +438,7 @@ pool= tagg.createPool( numbreOfThreads ) ->
        emit: [Function: emit],
        destroy: [Function: destroy],
        id: 0,
-       version: '0.1.9',
+       version: '0.1.10',
        on: [Function: on],
        once: [Function: once],
        _on: {},
