@@ -62,22 +62,22 @@ struct loadStruct {
 };
 
 struct eventsQueueItem {
-  int eventType;
-  eventsQueueItem* next;
+  volatile int eventType;
+  eventsQueueItem * volatile next;
   Persistent<Object> callback;
   union {
-    emitStruct emit;
-    evalStruct eval;
-    loadStruct load;
+    volatile emitStruct emit;
+    volatile evalStruct eval;
+    volatile loadStruct load;
   };
 };
 
 struct eventsQueue {
-  eventsQueueItem* first;
-  eventsQueueItem* pullPtr;
+  eventsQueueItem * volatile first;
+  eventsQueueItem * volatile pullPtr;
   union {
-    eventsQueueItem* pushPtr;
-    eventsQueueItem* last;
+    eventsQueueItem * volatile pushPtr;
+    eventsQueueItem * volatile last;
   };
 };
 
@@ -160,7 +160,7 @@ void Init (Handle<Object>);
 
 //Globals BEGIN
 
-const char* k_TAGG_VERSION= "0.1.10";
+const char* k_TAGG_VERSION= "0.1.11";
 
 static int TAGG_DEBUG= 0;
 static bool useLocker;
@@ -213,8 +213,9 @@ static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
   qitem->next= NULL;
   assert(queue->pushPtr != NULL);
   assert(queue->pushPtr->next == NULL);
-  queue->pushPtr->next= qitem;
+  eventsQueueItem* save= queue->pushPtr;
   queue->pushPtr= qitem;
+  save->next= qitem;
 }
 
 
@@ -226,13 +227,13 @@ static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
 //Se puede usar en cualquier thread pero solo si pasas la cola apropiada
 static inline eventsQueueItem* qPull (eventsQueue* queue) {
   TAGG_DEBUG && printf("Q_PULL\n");
-  eventsQueueItem* qitem= queue->pullPtr;
-  assert(queue->pullPtr != NULL);
-  while (!qitem->eventType && qitem->next) {
+  eventsQueueItem* qitem;
+  assert((qitem= queue->pullPtr) != NULL);
+  while ((qitem->eventType == eventTypeNone) && qitem->next) {
     queue->pullPtr= qitem->next;
     qitem= queue->pullPtr;
   }
-  return !qitem->eventType ? NULL : qitem;
+  return (qitem->eventType == eventTypeNone) ? NULL : qitem;
 }
 
 
@@ -250,6 +251,7 @@ static inline eventsQueueItem* qUsed (eventsQueue* queue) {
   if (queue->first != queue->pullPtr) {
     qitem= queue->first;
     assert(qitem->next != NULL);
+    assert(queue->first != queue->pullPtr);
     queue->first= qitem->next;
     qitem->next= NULL;
   }
@@ -543,8 +545,9 @@ static void eventLoop (typeThread* thread) {
   while (1) {
   
       double ntql;
-      eventsQueueItem *qitem= NULL;
-      eventsQueueItem *event, *qitem3;
+      eventsQueueItem* qitem= NULL;
+      eventsQueueItem* event;
+      eventsQueueItem* qitem3;
       TryCatch onError;
         
       TAGG_DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
@@ -594,7 +597,12 @@ static void eventLoop (typeThread* thread) {
                 memcpy(qitem3, event, sizeof(eventsQueueItem));
                 qitem3->eventType= eventTypeEval;
                 qitem3->eval.error= event->load.error;
-                qitem3->eval.resultado= o2cstr(qitem3->eval.error ? onError.Exception() : resultado);
+                if (qitem3->eval.error == 0)
+                  qitem3->eval.resultado= o2cstr(resultado);
+                else if (qitem3->eval.error == 1)
+                  qitem3->eval.resultado= o2cstr(onError.Exception());
+                else
+                  qitem3->eval.resultado= strdup("fopen(path) error");
                 qPush(qitem3, thread->processEventsQueue);
                 WAKEUP_NODE_EVENT_LOOP
               }
