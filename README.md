@@ -24,7 +24,7 @@ From source:
     # or
     node-waf configure build install
     # Depending of what wersion of node you've got.
-    # THREADS_A_GOGO CURRENTLY (v0.1.10) RUNS ON NODES v0.5.1 TO v0.10.48
+    # THREADS_A_GOGO CURRENTLY (v0.1.12) RUNS ON NODES v0.5.1 TO v0.10.48
 
 Basic functionality test:
 
@@ -42,7 +42,7 @@ Basic functionality test:
     27.OK.WAITING FOR DESTROY CB
     28.OK.29.DESTROY CB OK
     END
-    THREADS_A_GOGO v0.1.10 BASIC FUNCTIONALITY TEST: OK, IT WORKS!
+    THREADS_A_GOGO v0.1.12 BASIC FUNCTIONALITY TEST: OK, IT WORKS!
 
 To include the module in your project:
 
@@ -54,7 +54,7 @@ The module **runs fine, though, in any node >= 0.2.0** as long as you build it w
 
 ## Intro
 
-After the initialization phase of a Node program, whose purpose is to setup listeners and callbacks to be executed in response to events, the next phase, the proper execution of the program, is orchestrated by the event loop whose duty is to [juggle events, listeners and callbacks quickly and without any hiccups nor interruptions that would ruin its performance](http://youtube.com/v/D0uA_NOb0PE?autoplay=1)
+After the initialization phase of a Node program, whose purpose is to setup listeners and callbacks to be executed in response to events, the next phase, the proper execution of the program, is orchestrated by the event loop whose duty is to [juggle events, listeners and callbacks quickly and without any hiccups nor interruptions that would ruin its performance](https://youtu.be/D0uA_NOb0PE?autoplay=1)
 
 Both the event loop and said listeners and callbacks run sequentially in a single thread of execution, Node's main thread. If any of them ever blocks, nothing else will happen for the duration of the block: no more events will be handled, no more callbacks nor listeners nor timeouts nor nextTick()ed functions will have the chance to run and do their job, because they won't be called by the blocked event loop, and the program will turn sluggish at best, or appear to be frozen and dead at worst.
 
@@ -263,7 +263,7 @@ tagg= require('threads_a_gogo') -> tagg object
 
 { create: [Function],
   createPool: [Function: createPool],
-  version: '0.1.10' }
+  version: '0.1.12' }
   
 ```
 ### .create()
@@ -286,7 +286,7 @@ thread= tagg.create() -> thread object
   emit: [Function: emit],
   destroy: [Function: destroy],
   id: 0,
-  version: '0.1.10',
+  version: '0.1.12',
   on: [Function: on],
   once: [Function: once],
   _on: {},
@@ -309,12 +309,12 @@ NOTE that most methods return the `thread` object so that calls can be chained l
 ### .eval( program [, cb])
 `thread.eval( program [, cb])` -> thread
 
-Converts `program.toString()` and eval()s (which is the equivalent of loading a script in a browser) it in the thread's global context, and (if provided) returns to a callback the completion value: `cb(err, completionValue)`. Some examples you can try in node's console, but first please declare a `function cb (a,b) { console.log(a,b) }`, that will be handy, then type `thread.eval("Math.random()", cb)` the thread will run that (`Math.random()`) and the `cb(err,result)` will get (and display) a `null (random number)`. A `thread.eval('function hello () { puts("Hello!"); return "world!"; }', cb)` will eval that in the global context of the thread and thus create a global function hello in the thread's js global context and your `cb(err,result)` will get `null undefined` in the result, `null` because there were no errors and `undefined` because the completion value of a function declaration is `undefined`. On the plus side, now you have injected for the first time in your life some js code of yours in a TAGG's thread and you can tell it to run that, do a `thread.eval('hello()',cb)` and the thread will print `Hello!` in the console and the `cb(err,result)` will receive `world!` into result. How cool is that?
+Converts `program.toString()` and eval()s (which is the equivalent of loading a script in a browser) it in the thread's global context, and (if provided) returns to a callback the completion value: `cb(err, completionValue)`. Some examples you can try in node's console, but first please declare a `function cb (a,b) { console.log(a,b) }`, that will be handy, then type `thread.eval("Math.random()", cb)` the thread will run that (`Math.random()`) and the `cb(err,result)` will get (and display) a `null (random number)`. A `thread.eval('function hello () { puts("Hello!"); return "world!" }', cb)` will eval that in the global context of the thread and thus create a global function hello in the thread's js global context and your `cb(err,result)` will get `null undefined` in the result, `null` because there were no errors and `undefined` because the completion value of a function declaration is `undefined`. On the plus side, now you have injected for the first time in your life some js code of yours in a TAGG's thread and you can tell it to run that, do a `thread.eval('hello()',cb)` and the thread will print `Hello!` in the console and the `cb(err,result)` will receive `world!` into result. How cool is that?
 
 ### .on( eventType, listener )
 `thread.on( eventType, listener )` -> thread
 
-Registers the listener `listener(data [, data2 ... ])` for any events of `eventType` that the thread `thread` may emit. For example, declare a `function cb (a,b,c) { console.log(a,b,c) }` and then do `thread.on("event", cb)`. Now whenever the thread emits an event of the type `event` (which by the way can be any arbitrary name/string you choose), `cb` will be triggered. Let's do that with a `thread.eval('i=5; while (i--) thread.emit("event", "How", "cool", "is that?");')` and the console will display `How cool is that?` five times, huh, unbelievable.
+Registers the listener `listener(data [, data2 ... ])` for any events of `eventType` that the thread `thread` may emit. For example, declare a `function cb (a,b,c) { console.log(a,b,c) }` and then do `thread.on("event", cb)`. Now whenever the thread emits an event of the type `event` (which by the way can be any arbitrary name/string you choose), `cb` will be triggered. Let's do that with a `thread.eval('i=5; while (i--) thread.emit("event", "How", "cool", "is that?")')` and the console will display `How cool is that?` five times, huh, unbelievable.
 
 ### .once( eventType, listener )
 `thread.once( eventType, listener )` -> thread
@@ -348,7 +348,7 @@ Inside every thread .create()d by threads_a_gogo, there's a global `thread` obje
 thread (a global) ->
 
 { id: 0,
-  version: '0.1.10',
+  version: '0.1.12',
   on: [Function: on],
   once: [Function: once],
   emit: [Function: emit],
@@ -438,7 +438,7 @@ pool= tagg.createPool( numbreOfThreads ) ->
        emit: [Function: emit],
        destroy: [Function: destroy],
        id: 0,
-       version: '0.1.10',
+       version: '0.1.12',
        on: [Function: on],
        once: [Function: once],
        _on: {},
