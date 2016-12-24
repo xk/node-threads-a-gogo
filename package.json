@@ -2,7 +2,7 @@
   "name": "threads_a_gogo",
   "version": "0.1.12",
   "main": "build/Release/threads_a_gogo.node",
-  "description": "███ Simple and fast JavaScript threads for Node.js ███",
+  "description": "██ Simple and fast JavaScript threads for Node.js ██",
   "keywords": [
     "a gogo",
     "ever",
