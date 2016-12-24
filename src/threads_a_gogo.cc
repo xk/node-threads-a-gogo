@@ -656,23 +656,25 @@ static void eventLoop (typeThread* thread) {
             else if (event->eventType == eventTypeEmit) {
               v8::HandleScope scope;
               
-              v8::Local<v8::Array> array= v8::Array::New(event->emit.argc);
+              v8::Local<v8::Array> array;
               v8::Local<v8::Value> args[2];
               
               TAGG_DEBUG && printf("THREAD %ld QITEM EVENT #%ld\n", thread->id, event->serial);
               
               assert(event->emit.eventName != NULL);
               args[0]= v8::String::New(event->emit.eventName);
-              args[1]= array;
-              int i= 0;
-              while (i < event->emit.argc) {
-                array->Set(i, v8::String::New(event->emit.argv[i]));
-                free(event->emit.argv[i]);
-                i++;
+              args[1]= array= v8::Array::New(event->emit.argc);
+              if (event->emit.argc) {
+                int i= 0;
+                while (i < event->emit.argc) {
+                  array->Set(i, v8::String::New(event->emit.argv[i]));
+                  free(event->emit.argv[i]);
+                  i++;
+                }
+                free(event->emit.argv);
               }
-              dev->CallAsFunction(global, 2, args);
               
-              free(event->emit.argv);
+              dev->CallAsFunction(global, 2, args);
               free(event->emit.eventName);
               event->eventType= eventTypeNone;
             }

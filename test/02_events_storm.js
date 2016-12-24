@@ -1,5 +1,5 @@
 //2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
-//threads_a_gogo test/00_emit_events_data.js
+//threads_a_gogo test/00_events_storm.js
 
 //Esto emite unos cuantos miles de eventos de distintos tipos y con distintos datos y longitudes
 //Y se asegura de que los listeners reciben correctamente lo enviado.
@@ -11,6 +11,12 @@ Array.prototype._rmv= function rmv (i,e,right) {
   while (right.length) this.push(right.shift())
   return e;
 }
+
+
+
+
+
+
 
 Array.prototype._has= function has (what,i,ok) {
   i= 0;
@@ -25,9 +31,21 @@ Array.prototype._has= function has (what,i,ok) {
   return ok;
 }
 
+
+
+
+
+
+
 function rnd (n) {
     return Math.floor(n * Math.random());
 }
+
+
+
+
+
+
 
 function rndStr (l, a, str) {
     a = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
@@ -49,13 +67,10 @@ function boot (eventTypes) {
       argv= Array.prototype.splice.call(arguments,0);
       argv.unshift(eventType);
       thread.emit.apply(thread, argv);
-      //puts("\x07");
-      //puts("THREAD"+ thread.id+ " CB FOR EVENT: "+ argv+ "\n");
     };
   }
   
   eventTypes.forEach(function (v,i,o) {
-    //puts("THREAD"+ thread.id+ " SET CB FOR EVENT: "+ v+ "\n");
     thread.on(v, threadWrapListener(v));
   });
   
@@ -68,10 +83,7 @@ function boot (eventTypes) {
 
 function processWrapListener (eventType, id) {
 
-  //process.stdout.write("PROCESS WRAP CB FOR THREAD "+ id+ " : "+ eventType+ "\n");
-  
   return function processListener (argv) {
-    //process.stdout.write("\x07");
     argv= Array.prototype.splice.call(arguments,0);
     argv.unshift(eventType);
     checkEvent({thread:this, argv:argv});
@@ -84,11 +96,8 @@ function processWrapListener (eventType, id) {
 
 
 
-function checkEvent (what,i,e,str,ok,event,len) {
+function checkEvent (what,i,ok,str,event,len) {
 
-  process.stdout.write("PROCESS GOT EVENT FROM THREAD "+ what.thread.id+ " : "+ what.argv);
-  process.stdout.write("                                \r");
-  
   i= 0;
   ok= 0;
   str= what.argv.toString();
@@ -104,22 +113,22 @@ function checkEvent (what,i,e,str,ok,event,len) {
   }
   
   if (ok) {
+    process.stdout.write("EVENT OK, "+ (--total)+" TO GO         \r");
     yesSent._rmv(i);
-    //process.stdout.write("EVENT FROM THREAD "+ e.thread.id+ " MATCH OK: "+ str+ "\n");
   }
   else {
     event= what.argv[0];
     len= what.thread._on[event].length;
-    //process.stdout.write("***** EVENT FROM THREAD "+ e.thread.id+ " MATCH NOT OK: "+ str+ " Q.LEN: "+ len+ "\x07\x07\n");
     while(t.length) t.pop().destroy();
     console.log("\nTHREAD EMIT DATA EVENTS TEST NOT OK, ERROR!\n");
+    while(t.length) t.pop().destroy();
     process.exit(1);
   }
   
   if (yesSent.length || notSent.length) return;
   
   //Hemos acabado!
-  console.log("\n\nTHREAD EMIT DATA EVENTS TEST OK, IT WORKS!\n");
+  console.log("\n\nTHREAD EVENTS STORM TEST ENDED OK, IT WORKS!\n");
   while(t.length) t.pop().destroy();
   
 }
@@ -129,30 +138,56 @@ function checkEvent (what,i,e,str,ok,event,len) {
 
 
 
-function createEvents (ctr) {
-  ctr= 0;
+function createEvents (events) {
+  
   eventTypes.forEach(function (eventType,i,what,j) {
     i= t.length;
     while (i--) {
-      //Only one listener per eventType, please.
       t[i].on(eventType, processWrapListener(eventType, t[i].id));
-      //process.stdout.write("PROCESS SET CB FOR THREAD "+ t[i].id+ " : "+ eventType+ "\n");
     }
   });
   
-  //process.stdout.write("\n");
-  
   eventTypes.forEach(function (eventType,i,what,j) {
-    i= 1+ rnd(16);
+    i= rnd(16);
     while (i--) {
       thread= t[rnd(t.length)];
       what= {thread:thread, argv:[eventType]};
-      j= 1+ rnd(8);
-      while (j--) what.argv.push(1+rndStr(rnd(8)));
-      notSent.push(what);
-      //process.stdout.write("PROCESS CREATING EVENT FOR THREAD "+ thread.id+ " #"+ (++ctr)+ " "+ what.argv+ "\n");
+      j= rnd(8);
+      while (j--) what.argv.push(rndStr(rnd(8)));
+      events.push(what);
+      process.stdout.write("CREATED EVENT #"+ events.length+"\r");
     }
   });
+  
+}
+
+
+
+
+
+
+function emitEvents (i,hownamy,what) {
+
+  //1/3 lo mandamos randomly de una tacada
+  
+  i= 0;
+  howMany= notSent.length/2;
+  while (++i < howMany) {
+    what= notSent._rmv(rnd(notSent.length));
+    what.thread.emit.apply(what.thread, what.argv);
+    yesSent.push(what);
+  }
+  
+  //Lo que queda se emite randomly en sucesivos nexticks
+  
+  (function loop (what) {
+    if (notSent.length) {
+      what= notSent._rmv(rnd(notSent.length));
+      what.thread.emit.apply(what.thread, what.argv);
+      yesSent.push(what);
+      setImmediate(loop);
+    }
+  })();
   
 }
 
@@ -162,48 +197,41 @@ function createEvents (ctr) {
 
 
 bootDONE= 0;
-function bootcb (err,res,howMany,i,what,ctr) {
+function threadBootCB (err,res,i,ctr,what) {
   if (err) {
-    //console.log("BOOTCB: ",err,res);
     return process.exit(1);
   }
   
-  if (++bootDONE !== t.length){
-    //console.log("BOOTCB: NOT YET...");
-    return;
-  }
+  if (++bootDONE !== t.length) return;
   
-  console.log("BOOTCB: RUN NOW");
+  console.log("THREAD BOOT CB: RUN");
   
-  createEvents();
+  createEvents(notSent);
+  total= notSent.length;
+  process.stdout.write("\n");
   
-  //All is setup but nothing has been sent/emitted yet
-  //Lets send half of them randomly right now in a single batch
+  //All setup ya solo falta emitir los events
   
-  //process.stdout.write("\n");
+  emitEvents();
   
+}
+
+
+
+
+
+
+
+function createEventTypes (t,i,n,str) {
   i= 0;
-  ctr= 0;
-  howMany= notSent.length/2;
-  while (++i < howMany) {
-    what= notSent._rmv(rnd(notSent.length));
-    //process.stdout.write("PROCESS SENDING EVENT TO THREAD "+ what.thread.id+ " #"+ (++ctr)+ " : "+ what.argv+"\n");
-    what.thread.emit.apply(what.thread, what.argv);
-    yesSent.push(what);
+  n= +process.argv[3] || 1024;
+  while (i < n) {
+    do {
+      str= rndStr(rnd(8));
+    } while(t._has(str));
+    t[i]= str;
+    i++;
   }
-  
-  //process.stdout.write("\n");
-  
-  //What is left we send it randomly in nexticks
-  (function loop (what) {
-    if (notSent.length) {
-      what= notSent._rmv(rnd(notSent.length));
-      what.thread.emit.apply(what.thread, what.argv);
-      yesSent.push(what);
-      //process.stdout.write("PROCESS NEXTTICK SENDING EVENT TO THREAD "+ what.thread.id+ " #"+ (++ctr)+ " : "+ what.argv+"\n");
-      setImmediate(loop);
-    }
-  })();
 }
 
 
@@ -212,38 +240,27 @@ function bootcb (err,res,howMany,i,what,ctr) {
 
 
 
-
-i= 0;
-eventTypes= [];
-n= +process.argv[3] || 128;
-while (i < n) {
-  do {
-    str= rndStr(1+rnd(8));
-  } while(eventTypes._has(str));
-  eventTypes[i++]= str;
+function createThreads (t,i,json,tagg) {
+  i= +process.argv[2] || 4;
+  json= JSON.stringify(eventTypes);
+  tagg= require("threads_a_gogo");
+  while (i--) {
+    t[i]= tagg.create().eval("("+ boot+ ")("+ json+ ")", threadBootCB);
+  }
 }
-json= JSON.stringify(eventTypes);
 
 
 
 
 
 
-
-DEBUG= 0;
 t= [];
+total= 0;
 notSent= [];
 yesSent= [];
-i= +process.argv[2] || 2;
-tagg= require("threads_a_gogo");
-while (i--) {
-  t[i]= tagg.create().eval("("+ boot+ ")("+ json+ ")", bootcb);
-}
+eventTypes= [];
+createEventTypes(eventTypes);
+createThreads(t);
 
-
-
-
-
-
-//process.stdout.write("\n");
+process.stdout.write("EVENTS STORM TEST BEGIN\n");
 
