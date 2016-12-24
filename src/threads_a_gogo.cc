@@ -1039,8 +1039,8 @@ static v8::Handle<v8::Value> Load (const v8::Arguments &args) {
 //No se usa xq parece que el inline no va, pero sirve para acortar processEmit y threadEmit,
 //por que casi todo el código es idéntico en ambas
 static inline void pushEmitEvent (eventsQueue* queue, const v8::Arguments &args) {
-  eventsQueueItem* event= nuQitem(queue);
-  event->eventType= eventTypeEmit;
+
+  eventsQueueItem* volatile event= nuQitem(queue);
   event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
   if (event->emit.argc) {
@@ -1051,7 +1051,12 @@ static inline void pushEmitEvent (eventsQueue* queue, const v8::Arguments &args)
       i++;
     }
   }
+  
+  TAGG_DEBUG && printf("PROCESS EMIT TO THREAD %ld #%ld\n", thread->id, event->serial);
+  
+  event->eventType= eventTypeEmit;
   qPush(event, queue);
+  
 }
 
 
@@ -1067,7 +1072,7 @@ static v8::Handle<v8::Value> processEmit (const v8::Arguments &args) {
   if (!thread) {
     return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.emit(): 'this' must be a thread object")));
   }
-  
+/*
   eventsQueueItem* volatile event= nuQitem(thread->threadEventsQueue);
   event->serial= serial++;
   event->emit.eventName= o2cstr(args[0]);
@@ -1085,6 +1090,8 @@ static v8::Handle<v8::Value> processEmit (const v8::Arguments &args) {
   
   event->eventType= eventTypeEmit;
   qPush(event, thread->threadEventsQueue);
+*/
+  pushEmitEvent(thread->threadEventsQueue, args);
   wakeUpThread(thread, thread->sigkill);
   return args.This();
 }
@@ -1101,7 +1108,7 @@ static v8::Handle<v8::Value> threadEmit (const v8::Arguments &args) {
   typeThread* thread= (typeThread*) v8::Isolate::GetCurrent()->GetData();
   assert(thread != NULL);
   assert(thread->threadMagicCookie == kThreadMagicCookie);
-  
+/*
   eventsQueueItem* volatile event= nuQitem(thread->processEventsQueue);
   event->serial= serial++;
   event->emit.eventName= o2cstr(args[0]);
@@ -1119,6 +1126,8 @@ static v8::Handle<v8::Value> threadEmit (const v8::Arguments &args) {
   
   event->eventType= eventTypeEmit;
   qPush(event, thread->processEventsQueue);
+*/
+  pushEmitEvent(thread->processEventsQueue, args);
   WAKEUP_NODE_EVENT_LOOP
   return args.This();
 }

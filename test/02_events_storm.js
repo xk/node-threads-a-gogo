@@ -3,6 +3,7 @@
 
 //Esto emite unos cuantos miles de eventos de distintos tipos y con distintos datos y longitudes
 //Y se asegura de que los listeners reciben correctamente lo enviado.
+//Es importante comprobar ,emit(eventType, dato) sin dato y/o sin eventType
 
 Array.prototype._rmv= function rmv (i,e,right) {
   e= this[i];
