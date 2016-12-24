@@ -13,7 +13,7 @@
 	{
         "target_name": "threads_a_gogo",
         "sources": [ "src/threads_a_gogo.cc" ],
-        'cflags_cc': [ '-O0' ],
+        "cflags_cc": [ "-O2", "-pedantic" ],
         "dependencies" : [ "configure" ]
 	},
     {
