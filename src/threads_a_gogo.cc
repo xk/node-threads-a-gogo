@@ -14,7 +14,7 @@
 #include <assert.h>
 
 //using namespace node;
-using namespace v8;
+//using namespace v8;
 
 //Macros BEGIN
 
@@ -66,7 +66,8 @@ struct loadStruct {
 struct eventsQueueItem {
   volatile int eventType;
   eventsQueueItem* volatile next;
-  Persistent<Object> callback;
+  volatile unsigned long serial;
+  v8::Persistent<v8::Object> callback;
   union {
     emitStruct emit;
     evalStruct eval;
@@ -112,10 +113,10 @@ typedef struct typeThread {
   pthread_cond_t idle_cv;
   pthread_mutex_t idle_mutex;
   
-  Isolate* isolate;
-  Persistent<Object> nodeObject;
-  Persistent<Object> nodeDispatchEvents;
-  Persistent<Object> destroyCallback;
+  v8::Isolate* isolate;
+  v8::Persistent<v8::Object> nodeObject;
+  v8::Persistent<v8::Object> nodeDispatchEvents;
+  v8::Persistent<v8::Object> destroyCallback;
   
 } typeThread;
 
@@ -133,11 +134,11 @@ static void qitemStorePush (eventsQueueItem*);
 static eventsQueueItem* qitemStorePull (void);
 static eventsQueue* qitemStoreInit (void);
 static void destroyQueue (eventsQueue*);
-static inline typeThread* isAThread (Handle<Object>);
+static inline typeThread* isAThread (v8::Handle<v8::Object>);
 static inline void wakeUpThread (typeThread*, int);
-static Handle<Value> Puts (const Arguments &);
+static v8::Handle<v8::Value> Puts (const v8::Arguments &);
 static void* threadBootProc (void*);
-static inline char* o2cstr (Handle<Value>);
+static inline char* o2cstr (v8::Handle<v8::Value>);
 static void eventLoop (typeThread*);
 static void notifyIdle (typeThread*);
 static void cleanUpAfterThread (typeThread*);
@@ -148,14 +149,14 @@ static void Callback (
   EV_P_ ev_async*
 #endif
                            , int);
-static Handle<Value> Destroy (const Arguments &);
-static Handle<Value> Eval (const Arguments &);
-static Handle<Value> Load (const Arguments &);
-static inline void pushEmitEvent (eventsQueue*, const Arguments &);
-static Handle<Value> processEmit (const Arguments &);
-static Handle<Value> threadEmit (const Arguments &);
-static Handle<Value> Create (const Arguments &);
-void Init (Handle<Object>);
+static v8::Handle<v8::Value> Destroy (const v8::Arguments &);
+static v8::Handle<v8::Value> Eval (const v8::Arguments &);
+static v8::Handle<v8::Value> Load (const v8::Arguments &);
+static inline void pushEmitEvent (eventsQueue*, const v8::Arguments &);
+static v8::Handle<v8::Value> processEmit (const v8::Arguments &);
+static v8::Handle<v8::Value> threadEmit (const v8::Arguments &);
+static v8::Handle<v8::Value> Create (const v8::Arguments &);
+void Init (v8::Handle<v8::Object>);
 
 //Prototypes END
 
@@ -167,11 +168,12 @@ const char* k_TAGG_VERSION= "0.1.12";
 static int TAGG_DEBUG= 0;
 static bool useLocker;
 static long int threadsCtr= 0;
-static Persistent<Object> boot_js;
-static Persistent<String> id_symbol;
-static Persistent<String> version_symbol;
-static Persistent<ObjectTemplate> threadTemplate;
+static v8::Persistent<v8::Object> boot_js;
+static v8::Persistent<v8::String> id_symbol;
+static v8::Persistent<v8::String> version_symbol;
+static v8::Persistent<v8::ObjectTemplate> threadTemplate;
 static eventsQueue* qitemStore;
+static unsigned long serial= 0;
 
 #include "boot.js.c"
 #include "pool.js.c"
@@ -226,15 +228,18 @@ static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
 
 
 //Se puede usar en cualquier thread pero solo si pasas la cola apropiada
-static inline eventsQueueItem* qPull (eventsQueue* queue) {
+static eventsQueueItem* qPull (eventsQueue* queue) {
   TAGG_DEBUG && printf("Q_PULL\n");
-  eventsQueueItem* qitem;
-  assert((qitem= queue->pullPtr) != NULL);
+  eventsQueueItem* qitem= queue->pullPtr;
+  assert(qitem != NULL);
   while ((qitem->eventType == eventTypeNone) && qitem->next) {
-    queue->pullPtr= qitem->next;
-    qitem= queue->pullPtr;
+    qitem= qitem->next;
+    queue->pullPtr= qitem;
   }
-  return (qitem->eventType == eventTypeNone) ? NULL : qitem;
+  if (qitem->eventType == eventTypeNone)
+    return NULL;
+  else
+    return qitem;
 }
 
 
@@ -386,7 +391,7 @@ static void destroyQueue (eventsQueue* queue) {
 
 
 //Llamar a un método de la thread con el 'this' (receiver) mal puesto es bombazo seguro, por eso esto.
-static typeThread* isAThread (Handle<Object> receiver) {
+static typeThread* isAThread (v8::Handle<v8::Object> receiver) {
   typeThread* thread;
   if (receiver->IsObject()) {
     if (receiver->InternalFieldCount() == 1) {
@@ -441,16 +446,16 @@ static void wakeUpThread (typeThread* thread, int sigkill) {
 
 
 //printf de andar por casa
-static Handle<Value> Puts (const Arguments &args) {
+static v8::Handle<v8::Value> Puts (const v8::Arguments &args) {
   int i= 0;
   while (i < args.Length()) {
-    HandleScope scope;
-    String::Utf8Value c_str(args[i]);
+    v8::HandleScope scope;
+    v8::String::Utf8Value c_str(args[i]);
     fputs(*c_str, stdout);
     i++;
   }
   fflush(stdout);
-  return Undefined();
+  return v8::Undefined();
 }
 
 
@@ -472,7 +477,7 @@ static void* threadBootProc (void* arg) {
   
   TAGG_DEBUG && printf("THREAD %ld BOOT ENTER\n", thread->id);
   
-  thread->isolate= Isolate::New();
+  thread->isolate= v8::Isolate::New();
   thread->isolate->SetData(thread);
   
   if (useLocker) {
@@ -504,8 +509,8 @@ static void* threadBootProc (void* arg) {
 
 
 
-static inline char* o2cstr (Handle<Value> o) {
-  String::Utf8Value utf8(o);
+static inline char* o2cstr (v8::Handle<v8::Value> o) {
+  v8::String::Utf8Value utf8(o);
   long len= utf8.length();
   char* r= (char*) malloc( (len + 1) * sizeof(char));
   memcpy(r, *utf8, len);
@@ -525,21 +530,21 @@ static void eventLoop (typeThread* thread) {
   TAGG_DEBUG && printf("THREAD %ld EVENTLOOP ENTER\n", thread->id);
 
   thread->isolate->Enter();
-  Persistent<Context> context= Context::New();
+  v8::Persistent<v8::Context> context= v8::Context::New();
   context->Enter();
   
-  HandleScope scope1;
+  v8::HandleScope scope1;
   
-  Local<Object> global= context->Global();
-  global->Set(String::New("puts"), FunctionTemplate::New(Puts)->GetFunction());
-  Local<Object> threadObject= Object::New();
-  threadObject->Set(String::New("id"), Number::New(thread->id));
-  threadObject->Set(String::New("version"),String::New(k_TAGG_VERSION));
-  threadObject->Set(String::New("emit"), FunctionTemplate::New(threadEmit)->GetFunction());
-  Local<Object> script= Local<Object>::New(Script::Compile(String::New(kBoot_js))->Run()->ToObject());
-  Local<Object> r= script->CallAsFunction(threadObject, 0, NULL)->ToObject();
-  Local<Object> dnt= r->Get(String::New("dnt"))->ToObject();
-  Local<Object> dev= r->Get(String::New("dev"))->ToObject();
+  v8::Local<v8::Object> global= context->Global();
+  global->Set(v8::String::New("puts"), v8::FunctionTemplate::New(Puts)->GetFunction());
+  v8::Local<v8::Object> threadObject= v8::Object::New();
+  threadObject->Set(v8::String::New("id"), v8::Number::New(thread->id));
+  threadObject->Set(v8::String::New("version"),v8::String::New(k_TAGG_VERSION));
+  threadObject->Set(v8::String::New("emit"), v8::FunctionTemplate::New(threadEmit)->GetFunction());
+  v8::Local<v8::Object> script= v8::Local<v8::Object>::New(v8::Script::Compile(v8::String::New(kBoot_js))->Run()->ToObject());
+  v8::Local<v8::Object> r= script->CallAsFunction(threadObject, 0, NULL)->ToObject();
+  v8::Local<v8::Object> dnt= r->Get(v8::String::New("dnt"))->ToObject();
+  v8::Local<v8::Object> dev= r->Get(v8::String::New("dev"))->ToObject();
   
   //SetFatalErrorHandler(FatalErrorCB);
     
@@ -549,7 +554,7 @@ static void eventLoop (typeThread* thread) {
       eventsQueueItem* qitem= NULL;
       eventsQueueItem* volatile event;
       eventsQueueItem* volatile qitem3;
-      TryCatch onError;
+      v8::TryCatch onError;
         
       TAGG_DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
 
@@ -564,10 +569,10 @@ static void eventLoop (typeThread* thread) {
             qitem= NULL;
             TAGG_DEBUG && printf("THREAD %ld QITEM\n", thread->id);
             if (event->eventType == eventTypeLoad) {
-              HandleScope scope;
+              v8::HandleScope scope;
               
-              Local<Script> script;
-              Local<Value> resultado;
+              v8::Local<v8::Script> script;
+              v8::Local<v8::Value> resultado;
               
               TAGG_DEBUG && printf("THREAD %ld QITEM LOAD\n", thread->id);
               
@@ -586,7 +591,7 @@ static void eventLoop (typeThread* thread) {
               }
               
               if (buf != NULL) {
-                script= Script::Compile(String::New(buf));
+                script= v8::Script::Compile(v8::String::New(buf));
                 free(buf);
                 if (!onError.HasCaught()) resultado= script->Run();
                 event->load.error= onError.HasCaught() ? 1 : 0;
@@ -616,14 +621,14 @@ static void eventLoop (typeThread* thread) {
               event->eventType= eventTypeNone;
             }
             else if (event->eventType == eventTypeEval) {
-              HandleScope scope;
+              v8::HandleScope scope;
               
-              Local<Script> script;
-              Local<Value> resultado;
+              v8::Local<v8::Script> script;
+              v8::Local<v8::Value> resultado;
               
               TAGG_DEBUG && printf("THREAD %ld QITEM EVAL\n", thread->id);
               
-              script= Script::New(String::New(event->eval.scriptText));
+              script= v8::Script::New(v8::String::New(event->eval.scriptText));
               free(event->eval.scriptText);
             
               if (!onError.HasCaught())
@@ -649,25 +654,26 @@ static void eventLoop (typeThread* thread) {
               event->eventType= eventTypeNone;
             }
             else if (event->eventType == eventTypeEmit) {
-              HandleScope scope;
+              v8::HandleScope scope;
               
-              Local<Array> array= Array::New(event->emit.argc);
-              Local<Value> args[2];
+              v8::Local<v8::Array> array= v8::Array::New(event->emit.argc);
+              v8::Local<v8::Value> args[2];
               
-              TAGG_DEBUG && printf("THREAD %ld QITEM EVENT\n", thread->id);
+              TAGG_DEBUG && printf("THREAD %ld QITEM EVENT #%ld\n", thread->id, event->serial);
               
-              args[0]= String::New(event->emit.eventName);
+              assert(event->emit.eventName != NULL);
+              args[0]= v8::String::New(event->emit.eventName);
               args[1]= array;
               int i= 0;
               while (i < event->emit.argc) {
-                array->Set(i, String::New(event->emit.argv[i]));
+                array->Set(i, v8::String::New(event->emit.argv[i]));
                 free(event->emit.argv[i]);
                 i++;
               }
+              dev->CallAsFunction(global, 2, args);
               
               free(event->emit.argv);
               free(event->emit.eventName);
-              dev->CallAsFunction(global, 2, args);
               event->eventType= eventTypeNone;
             }
             else {
@@ -679,7 +685,7 @@ static void eventLoop (typeThread* thread) {
 
           if (thread->sigkill == kKillRudely) break;
           else {
-            HandleScope scope;
+            v8::HandleScope scope;
             TAGG_DEBUG && printf("THREAD %ld NTQL\n", thread->id);
             ntql= dnt->CallAsFunction(global, 0, NULL)->ToNumber()->Value();
             if (onError.HasCaught()) onError.Reset();
@@ -695,7 +701,7 @@ static void eventLoop (typeThread* thread) {
 
       if (thread->sigkill) break;
 
-      V8::IdleNotification();
+      v8::V8::IdleNotification();
       
       TAGG_DEBUG && printf("THREAD %ld BEFORE MUTEX\n", thread->id);
       //cogemos el lock para
@@ -754,11 +760,11 @@ static void notifyIdle (typeThread* thread) {
 
 //Esto es por culpa de libuv que se empeña en tener un callback de terminación. Al parecer...
 static void cleanUpAfterThreadCallback (uv_handle_t* arg) {
-  HandleScope scope;
+  v8::HandleScope scope;
   typeThread* thread= (typeThread*) arg;
   TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThreadCallback()\n", thread->id);
   if (thread->hasDestroyCallback) {
-    thread->destroyCallback->CallAsFunction(Context::GetCurrent()->Global(), 0, NULL);
+    thread->destroyCallback->CallAsFunction(v8::Context::GetCurrent()->Global(), 0, NULL);
   }
   thread->destroyCallback.Dispose();
   free(thread);
@@ -828,19 +834,19 @@ static void Callback (
 #endif
                            , int status) {
                            
-  HandleScope scope;
+  v8::HandleScope scope;
   
-  eventsQueueItem* event;
+  eventsQueueItem* volatile event;
   typeThread* thread= (typeThread*) watcher;
   
-  Local<Array> array;
-  Local<Value> args[2];
-  Local<Value> null= Local<Value>::New(Null());
+  v8::Local<v8::Array> array;
+  v8::Local<v8::Value> args[2];
+  v8::Local<v8::Value> null= v8::Local<v8::Value>::New(v8::Null());
   
   assert(thread != NULL);
   assert(!thread->destroyed);
   
-  TryCatch onError;
+  v8::TryCatch onError;
   while ((event= qPull(thread->processEventsQueue))) {
   
     TAGG_DEBUG && printf("CALLBACK %ld IN MAIN THREAD\n", thread->id);
@@ -855,12 +861,12 @@ static void Callback (
       assert(event->eval.resultado != NULL);
       
       if (event->eval.error) {
-        args[0]= Exception::Error(String::New(event->eval.resultado));
+        args[0]= v8::Exception::Error(v8::String::New(event->eval.resultado));
         args[1]= null;
       }
       else {
         args[0]= null;
-        args[1]= String::New(event->eval.resultado);
+        args[1]= v8::String::New(event->eval.resultado);
       }
       event->callback->CallAsFunction(thread->nodeObject, 2, args);
       
@@ -877,21 +883,21 @@ static void Callback (
     
       TAGG_DEBUG && printf("CALLBACK eventTypeEmit IN MAIN THREAD\n");
       
-      args[0]= String::New(event->emit.eventName);
-      array= Array::New(event->emit.argc);
+      args[0]= v8::String::New(event->emit.eventName);
+      array= v8::Array::New(event->emit.argc);
       args[1]= array;
       
       if (event->emit.argc) {
         int i= 0;
         while (i < event->emit.argc) {
-          array->Set(i, String::New(event->emit.argv[i]));
+          array->Set(i, v8::String::New(event->emit.argv[i]));
           free(event->emit.argv[i]);
           i++;
         }
         free(event->emit.argv);
       }
 
-      thread->nodeDispatchEvents->CallAsFunction(Context::GetCurrent()->Global(), 2, args);
+      thread->nodeDispatchEvents->CallAsFunction(v8::Context::GetCurrent()->Global(), 2, args);
       
       free(event->emit.eventName);
       event->eventType = eventTypeNone;
@@ -899,6 +905,9 @@ static void Callback (
     else {
       assert(0);
     }
+    
+    event->eventType = eventTypeNone;
+    event= NULL;
   }
   
   if (thread->sigkill && thread->ended) {
@@ -917,7 +926,7 @@ static void Callback (
 
 
 // Tell a thread to quit, either nicely or rudely.
-static Handle<Value> Destroy (const Arguments &args) {
+static v8::Handle<v8::Value> Destroy (const v8::Arguments &args) {
 
   //thread.destroy() or thread.destroy(0) means nicely (the default)
   //thread destroy(1) means rudely.
@@ -926,14 +935,14 @@ static Handle<Value> Destroy (const Arguments &args) {
   //When done rudely it will try to exit the event loop regardless.
   //ToDo: If the thread is stuck in a ` while (1) ; ` or something this won't work...
   
-  HandleScope scope;
+  v8::HandleScope scope;
   //TODO: Hay que comprobar que this en un objeto y que tiene hiddenRefTotypeThread_symbol y que no es nil
   //TODO: Aquí habría que usar static void TerminateExecution(int thread_id);
   //TODO: static void v8::V8::TerminateExecution  ( Isolate *   isolate= NULL   )
   
   typeThread* thread= isAThread(args.This());
   if (!thread) {
-    return ThrowException(Exception::TypeError(String::New("thread.destroy(): the receiver must be a thread object")));
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.destroy(): the receiver must be a thread object")));
   }
   
   int nuSigkill= kKillNicely;
@@ -943,7 +952,7 @@ static Handle<Value> Destroy (const Arguments &args) {
   
   thread->hasDestroyCallback= (args.Length() > 1) && (args[1]->IsFunction());
   if (thread->hasDestroyCallback) {
-    thread->destroyCallback= Persistent<Object>::New(args[1]->ToObject());
+    thread->destroyCallback= v8::Persistent<v8::Object>::New(args[1]->ToObject());
   }
   
   if (TAGG_DEBUG) {
@@ -952,7 +961,7 @@ static Handle<Value> Destroy (const Arguments &args) {
   }
   
   wakeUpThread(thread, nuSigkill);
-  return Undefined();
+  return v8::Undefined();
 }
 
 
@@ -963,22 +972,22 @@ static Handle<Value> Destroy (const Arguments &args) {
 
 
 // Eval: Pushes an eval job to the threadEventsQueue.
-static Handle<Value> Eval (const Arguments &args) {
-  HandleScope scope;
+static v8::Handle<v8::Value> Eval (const v8::Arguments &args) {
+  v8::HandleScope scope;
   
   if (!args.Length()) {
-    return ThrowException(Exception::TypeError(String::New("thread.eval(program [,callback]): missing arguments")));
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.eval(program [,callback]): missing arguments")));
   }
   
   typeThread* thread= isAThread(args.This());
   if (!thread) {
-    return ThrowException(Exception::TypeError(String::New("thread.eval(): the receiver must be a thread object")));
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.eval(): the receiver must be a thread object")));
   }
 
   eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
   event->eval.hasCallback= (args.Length() > 1) && (args[1]->IsFunction());
   if (event->eval.hasCallback) {
-    event->callback= Persistent<Object>::New(args[1]->ToObject());
+    event->callback= v8::Persistent<v8::Object>::New(args[1]->ToObject());
   }
   event->eval.scriptText= o2cstr(args[0]);
   event->eventType= eventTypeEval;
@@ -995,16 +1004,16 @@ static Handle<Value> Eval (const Arguments &args) {
 
 
 // Load: emits a eventTypeLoad event to the thread
-static Handle<Value> Load (const Arguments &args) {
-  HandleScope scope;
+static v8::Handle<v8::Value> Load (const v8::Arguments &args) {
+  v8::HandleScope scope;
 
   if (!args.Length()) {
-    return ThrowException(Exception::TypeError(String::New("thread.load(filename [,callback]): missing arguments")));
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.load(filename [,callback]): missing arguments")));
   }
 
   typeThread* thread= isAThread(args.This());
   if (!thread) {
-    return ThrowException(Exception::TypeError(String::New("thread.load(): the receiver must be a thread object")));
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.load(): the receiver must be a thread object")));
   }
   
   eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
@@ -1012,7 +1021,7 @@ static Handle<Value> Load (const Arguments &args) {
   event->load.path= o2cstr(args[0]);
   event->load.hasCallback= ((args.Length() > 1) && (args[1]->IsFunction()));
   if (event->load.hasCallback) {
-    event->callback= Persistent<Object>::New(args[1]->ToObject());
+    event->callback= v8::Persistent<v8::Object>::New(args[1]->ToObject());
   }
   qPush(event, thread->threadEventsQueue);
   wakeUpThread(thread, thread->sigkill);
@@ -1027,7 +1036,7 @@ static Handle<Value> Load (const Arguments &args) {
 
 //No se usa xq parece que el inline no va, pero sirve para acortar processEmit y threadEmit,
 //por que casi todo el código es idéntico en ambas
-static inline void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
+static inline void pushEmitEvent (eventsQueue* queue, const v8::Arguments &args) {
   eventsQueueItem* event= nuQitem(queue);
   event->eventType= eventTypeEmit;
   event->emit.eventName= o2cstr(args[0]);
@@ -1050,15 +1059,15 @@ static inline void pushEmitEvent (eventsQueue* queue, const Arguments &args) {
 
 
 //La que emite los events de node hacia las threads
-static Handle<Value> processEmit (const Arguments &args) {
+static v8::Handle<v8::Value> processEmit (const v8::Arguments &args) {
   if (!args.Length()) return args.This();
   typeThread* thread= isAThread(args.This());
   if (!thread) {
-    return ThrowException(Exception::TypeError(String::New("thread.emit(): 'this' must be a thread object")));
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.emit(): 'this' must be a thread object")));
   }
-/*
-  eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
-  event->eventType= eventTypeEmit;
+  
+  eventsQueueItem* volatile event= nuQitem(thread->threadEventsQueue);
+  event->serial= serial++;
   event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
   if (event->emit.argc) {
@@ -1069,9 +1078,11 @@ static Handle<Value> processEmit (const Arguments &args) {
       i++;
     }
   }
+  
+  TAGG_DEBUG && printf("PROCESS EMIT TO THREAD %ld #%ld\n", thread->id, event->serial);
+  
+  event->eventType= eventTypeEmit;
   qPush(event, thread->threadEventsQueue);
-*/
-  pushEmitEvent(thread->threadEventsQueue, args);
   wakeUpThread(thread, thread->sigkill);
   return args.This();
 }
@@ -1083,14 +1094,14 @@ static Handle<Value> processEmit (const Arguments &args) {
 
 
 //La que emite los events de las threads hacia node
-static Handle<Value> threadEmit (const Arguments &args) {
+static v8::Handle<v8::Value> threadEmit (const v8::Arguments &args) {
   if (!args.Length()) return args.This();
-  typeThread* thread= (typeThread*) Isolate::GetCurrent()->GetData();
+  typeThread* thread= (typeThread*) v8::Isolate::GetCurrent()->GetData();
   assert(thread != NULL);
   assert(thread->threadMagicCookie == kThreadMagicCookie);
-/*
-  eventsQueueItem* event= nuQitem(thread->processEventsQueue);
-  event->eventType= eventTypeEmit;
+  
+  eventsQueueItem* volatile event= nuQitem(thread->processEventsQueue);
+  event->serial= serial++;
   event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
   if (event->emit.argc) {
@@ -1101,9 +1112,11 @@ static Handle<Value> threadEmit (const Arguments &args) {
       i++;
     }
   }
+  
+  TAGG_DEBUG && printf("THREAD %ld EMIT #%ld\n", thread->id, event->serial);
+  
+  event->eventType= eventTypeEmit;
   qPush(event, thread->processEventsQueue);
-*/
-  pushEmitEvent(thread->processEventsQueue, args);
   WAKEUP_NODE_EVENT_LOOP
   return args.This();
 }
@@ -1116,19 +1129,19 @@ static Handle<Value> threadEmit (const Arguments &args) {
 
 
 //Se ejecuta al hacer tagg.create(): Creates and launches a new isolate in a new background thread.
-static Handle<Value> Create (const Arguments &args) {
-    HandleScope scope;
+static v8::Handle<v8::Value> Create (const v8::Arguments &args) {
+    v8::HandleScope scope;
     
     typeThread* thread= (typeThread*) calloc(1, sizeof (typeThread));
     thread->id= threadsCtr++;
     thread->threadMagicCookie= kThreadMagicCookie;
     thread->threadEventsQueue= nuQueue();
     thread->processEventsQueue= nuQueue();
-    thread->nodeObject= Persistent<Object>::New(threadTemplate->NewInstance());
+    thread->nodeObject= v8::Persistent<v8::Object>::New(threadTemplate->NewInstance());
     thread->nodeObject->SetPointerInInternalField(0, thread);
-    thread->nodeObject->Set(id_symbol, Integer::New(thread->id));
-    thread->nodeObject->Set(version_symbol, String::New(k_TAGG_VERSION));
-    thread->nodeDispatchEvents= Persistent<Object>::New(boot_js->CallAsFunction(thread->nodeObject, 0, NULL)->ToObject());
+    thread->nodeObject->Set(id_symbol, v8::Integer::New(thread->id));
+    thread->nodeObject->Set(version_symbol, v8::String::New(k_TAGG_VERSION));
+    thread->nodeDispatchEvents= v8::Persistent<v8::Object>::New(boot_js->CallAsFunction(thread->nodeObject, 0, NULL)->ToObject());
     
     pthread_cond_init(&(thread->idle_cv), NULL);
     pthread_mutex_init(&(thread->idle_mutex), NULL);
@@ -1149,7 +1162,7 @@ static Handle<Value> Create (const Arguments &args) {
       printf("THREAD %ld PTHREAD_CREATE() ERROR %d : %s NOT RETRYING ANY MORE\n", thread->id, err, errstr);
       TAGG_DEBUG && printf("CALLED cleanUpAfterThread %ld FROM CREATE()\n", thread->id);
       cleanUpAfterThread(thread);
-      return ThrowException(Exception::TypeError(String::New("create(): error in pthread_create()")));
+      return v8::ThrowException(v8::Exception::TypeError(v8::String::New("create(): error in pthread_create()")));
     }
     else {
     
@@ -1173,23 +1186,23 @@ static Handle<Value> Create (const Arguments &args) {
 
 
 //Esto es lo primero que llama node al hacer require('threads_a_gogo')
-void Init (Handle<Object> target) {
+void Init (v8::Handle<v8::Object> target) {
   qitemStore= qitemStoreInit();
   useLocker= v8::Locker::IsActive();
-  id_symbol= Persistent<String>::New(String::NewSymbol("id"));
-  version_symbol= Persistent<String>::New(String::NewSymbol("version"));
-  boot_js= Persistent<Object>::New(Script::Compile(String::New(kBoot_js))->Run()->ToObject());
+  id_symbol= v8::Persistent<v8::String>::New(v8::String::NewSymbol("id"));
+  version_symbol= v8::Persistent<v8::String>::New(v8::String::NewSymbol("version"));
+  boot_js= v8::Persistent<v8::Object>::New(v8::Script::Compile(v8::String::New(kBoot_js))->Run()->ToObject());
   
-  threadTemplate= Persistent<ObjectTemplate>::New(ObjectTemplate::New());
+  threadTemplate= v8::Persistent<v8::ObjectTemplate>::New(v8::ObjectTemplate::New());
   threadTemplate->SetInternalFieldCount(1);
-  threadTemplate->Set(String::NewSymbol("load"), FunctionTemplate::New(Load));
-  threadTemplate->Set(String::NewSymbol("eval"), FunctionTemplate::New(Eval));
-  threadTemplate->Set(String::NewSymbol("emit"), FunctionTemplate::New(processEmit));
-  threadTemplate->Set(String::NewSymbol("destroy"), FunctionTemplate::New(Destroy));
+  threadTemplate->Set(v8::String::NewSymbol("load"), v8::FunctionTemplate::New(Load));
+  threadTemplate->Set(v8::String::NewSymbol("eval"), v8::FunctionTemplate::New(Eval));
+  threadTemplate->Set(v8::String::NewSymbol("emit"), v8::FunctionTemplate::New(processEmit));
+  threadTemplate->Set(v8::String::NewSymbol("destroy"), v8::FunctionTemplate::New(Destroy));
   
-  target->Set(String::NewSymbol("create"), FunctionTemplate::New(Create)->GetFunction());
-  target->Set(String::NewSymbol("createPool"), Script::Compile(String::New(kPool_js))->Run()->ToObject());
-  target->Set(version_symbol, String::New(k_TAGG_VERSION));
+  target->Set(v8::String::NewSymbol("create"), v8::FunctionTemplate::New(Create)->GetFunction());
+  target->Set(v8::String::NewSymbol("createPool"), v8::Script::Compile(v8::String::New(kPool_js))->Run()->ToObject());
+  target->Set(version_symbol, v8::String::New(k_TAGG_VERSION));
 }
 
 NODE_MODULE(threads_a_gogo, Init)
