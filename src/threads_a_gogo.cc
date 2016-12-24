@@ -43,41 +43,43 @@ typedef enum eventTypes {
 } eventTypes;
 
 struct emitStruct {
-  int argc;
+  volatile int argc;
   char** argv;
-  char* eventName;
+  char* volatile eventName;
 };
 
 struct evalStruct {
-  int error;
-  int hasCallback;
-  char* resultado;
-  char* scriptText;
+  volatile int error;
+  volatile int hasCallback;
+  union {
+    char* volatile resultado;
+    char* volatile scriptText;
+  };
 };
 
 struct loadStruct {
-  int error;
-  int hasCallback;
-  char* path;
+  volatile int error;
+  volatile int hasCallback;
+  char* volatile path;
 };
 
 struct eventsQueueItem {
   volatile int eventType;
-  eventsQueueItem * volatile next;
+  eventsQueueItem* volatile next;
   Persistent<Object> callback;
   union {
-    volatile emitStruct emit;
-    volatile evalStruct eval;
-    volatile loadStruct load;
+    emitStruct emit;
+    evalStruct eval;
+    loadStruct load;
   };
 };
 
 struct eventsQueue {
-  eventsQueueItem * volatile first;
-  eventsQueueItem * volatile pullPtr;
+  eventsQueueItem* volatile first;
+  eventsQueueItem* volatile pullPtr;
   union {
-    eventsQueueItem * volatile pushPtr;
-    eventsQueueItem * volatile last;
+    eventsQueueItem* volatile pushPtr;
+    eventsQueueItem* volatile last;
   };
 };
 
@@ -131,8 +133,8 @@ static void qitemStorePush (eventsQueueItem*);
 static eventsQueueItem* qitemStorePull (void);
 static eventsQueue* qitemStoreInit (void);
 static void destroyQueue (eventsQueue*);
-static typeThread* isAThread (Handle<Object>);
-static void wakeUpThread (typeThread*, int);
+static inline typeThread* isAThread (Handle<Object>);
+static inline void wakeUpThread (typeThread*, int);
 static Handle<Value> Puts (const Arguments &);
 static void* threadBootProc (void*);
 static inline char* o2cstr (Handle<Value>);
@@ -160,7 +162,7 @@ void Init (Handle<Object>);
 
 //Globals BEGIN
 
-const char* k_TAGG_VERSION= "0.1.11";
+const char* k_TAGG_VERSION= "0.1.12";
 
 static int TAGG_DEBUG= 0;
 static bool useLocker;
@@ -213,9 +215,8 @@ static inline void qPush (eventsQueueItem* qitem, eventsQueue* queue) {
   qitem->next= NULL;
   assert(queue->pushPtr != NULL);
   assert(queue->pushPtr->next == NULL);
-  eventsQueueItem* save= queue->pushPtr;
+  queue->pushPtr->next= qitem;
   queue->pushPtr= qitem;
-  save->next= qitem;
 }
 
 
@@ -546,8 +547,8 @@ static void eventLoop (typeThread* thread) {
   
       double ntql;
       eventsQueueItem* qitem= NULL;
-      eventsQueueItem* event;
-      eventsQueueItem* qitem3;
+      eventsQueueItem* volatile event;
+      eventsQueueItem* volatile qitem3;
       TryCatch onError;
         
       TAGG_DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
@@ -571,7 +572,9 @@ static void eventLoop (typeThread* thread) {
               TAGG_DEBUG && printf("THREAD %ld QITEM LOAD\n", thread->id);
               
               char* buf= NULL;
+              assert(event->load.path != NULL);
               FILE* fp= fopen(event->load.path, "rb");
+              free(event->load.path);
               
               if (fp) {
                 fseek(fp, 0, SEEK_END);
@@ -594,50 +597,55 @@ static void eventLoop (typeThread* thread) {
               
               if (event->load.hasCallback) {
                 qitem3= nuQitem(thread->processEventsQueue);
-                memcpy(qitem3, event, sizeof(eventsQueueItem));
-                qitem3->eventType= eventTypeEval;
                 qitem3->eval.error= event->load.error;
-                if (qitem3->eval.error == 0)
+                if (!qitem3->eval.error)
                   qitem3->eval.resultado= o2cstr(resultado);
                 else if (qitem3->eval.error == 1)
                   qitem3->eval.resultado= o2cstr(onError.Exception());
                 else
                   qitem3->eval.resultado= strdup("fopen(path) error");
+                qitem3->callback= event->callback;
+                qitem3->load.hasCallback= 1;
+                qitem3->eventType= eventTypeEval;
                 qPush(qitem3, thread->processEventsQueue);
                 WAKEUP_NODE_EVENT_LOOP
               }
               
               if (onError.HasCaught()) onError.Reset();
               
-              free(event->load.path);
               event->eventType= eventTypeNone;
             }
             else if (event->eventType == eventTypeEval) {
               HandleScope scope;
               
               Local<Script> script;
-              Local<String> source;
               Local<Value> resultado;
               
               TAGG_DEBUG && printf("THREAD %ld QITEM EVAL\n", thread->id);
               
-              source= String::New(event->eval.scriptText);
-              script= Script::New(source);
+              script= Script::New(String::New(event->eval.scriptText));
+              free(event->eval.scriptText);
             
-              if (!onError.HasCaught()) resultado= script->Run();
+              if (!onError.HasCaught())
+                resultado= script->Run();
+              event->eval.error= onError.HasCaught() ? 1 : 0;
 
               if (event->eval.hasCallback) {
                 qitem3= nuQitem(thread->processEventsQueue);
-                memcpy(qitem3, event, sizeof(eventsQueueItem));
-                qitem3->eval.error= onError.HasCaught() ? 1 : 0;
-                qitem3->eval.resultado= o2cstr( qitem3->eval.error ? onError.Exception() : resultado );
+                qitem3->eval.error= event->eval.error;
+                if (!qitem3->eval.error)
+                  qitem3->eval.resultado= o2cstr(resultado);
+                else
+                  qitem3->eval.resultado= o2cstr(onError.Exception());
+                qitem3->callback= event->callback;
+                qitem3->eval.hasCallback= 1;
+                qitem3->eventType= eventTypeEval;
                 qPush(qitem3, thread->processEventsQueue);
                 WAKEUP_NODE_EVENT_LOOP
               }
               
               if (onError.HasCaught()) onError.Reset();
               
-              free(event->eval.scriptText);
               event->eventType= eventTypeNone;
             }
             else if (event->eventType == eventTypeEmit) {
@@ -1048,6 +1056,7 @@ static Handle<Value> processEmit (const Arguments &args) {
   if (!thread) {
     return ThrowException(Exception::TypeError(String::New("thread.emit(): 'this' must be a thread object")));
   }
+/*
   eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
   event->eventType= eventTypeEmit;
   event->emit.eventName= o2cstr(args[0]);
@@ -1061,6 +1070,8 @@ static Handle<Value> processEmit (const Arguments &args) {
     }
   }
   qPush(event, thread->threadEventsQueue);
+*/
+  pushEmitEvent(thread->threadEventsQueue, args);
   wakeUpThread(thread, thread->sigkill);
   return args.This();
 }
@@ -1075,6 +1086,9 @@ static Handle<Value> processEmit (const Arguments &args) {
 static Handle<Value> threadEmit (const Arguments &args) {
   if (!args.Length()) return args.This();
   typeThread* thread= (typeThread*) Isolate::GetCurrent()->GetData();
+  assert(thread != NULL);
+  assert(thread->threadMagicCookie == kThreadMagicCookie);
+/*
   eventsQueueItem* event= nuQitem(thread->processEventsQueue);
   event->eventType= eventTypeEmit;
   event->emit.eventName= o2cstr(args[0]);
@@ -1088,6 +1102,8 @@ static Handle<Value> threadEmit (const Arguments &args) {
     }
   }
   qPush(event, thread->processEventsQueue);
+*/
+  pushEmitEvent(thread->processEventsQueue, args);
   WAKEUP_NODE_EVENT_LOOP
   return args.This();
 }
