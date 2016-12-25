@@ -277,7 +277,7 @@ static inline eventsQueueItem* nuQitem (eventsQueue* queue) {
   if (queue) qitem= qUsed(queue);
   if (!qitem) {
     qitem= (eventsQueueItem*) calloc(1, sizeof(eventsQueueItem));
-    beep();
+    //beep();
   }
   qitem->serial= serial++;
   qitem->eventType= eventTypeNone;
