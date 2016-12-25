@@ -5,12 +5,8 @@
 //Y se asegura de que los listeners reciben correctamente lo enviado.
 //Es importante comprobar ,emit(eventType, dato) sin dato y/o sin eventType
 
-Array.prototype._rmv= function rmv (i,e,right) {
-  e= this[i];
-  right= this.slice(i+1);
-  this.length= i;
-  while (right.length) this.push(right.shift())
-  return e;
+Array.prototype._rmv= function rmv (i) {
+  return this.splice(i,1);
 }
 
 
@@ -97,16 +93,17 @@ function processWrapListener (eventType, id) {
 
 
 
-function checkEvent (what,i,ok,str,event,len) {
+function checkEvent (what,i,ok,str,e,event,len,nuArray) {
 
   i= 0;
   ok= 0;
   str= what.argv.toString();
-  while (i < yesSent.length) {
-    e= yesSent[i];
+  while (i < sentEvents.length) {
+    e= sentEvents[i];
     if (e.thread === what.thread) {
       if (e.argv.toString() === str) {
         ok= 1;
+        sentEvents._rmv(i);
         break;
       }
     }
@@ -114,8 +111,8 @@ function checkEvent (what,i,ok,str,event,len) {
   }
   
   if (ok) {
-    process.stdout.write("EVENT OK, "+ (--total)+" TO GO         \r");
-    yesSent._rmv(i);
+    total+= 1;
+    process.stdout.write("EVENT OK, THREAD "+ e.thread.id+ ", #"+ total+"  \r");
   }
   else {
     event= what.argv[0];
@@ -126,7 +123,7 @@ function checkEvent (what,i,ok,str,event,len) {
     process.exit(1);
   }
   
-  if (yesSent.length || notSent.length) return;
+  if (total <  howManyEvents) return;
   
   //Hemos acabado!
   console.log("\n\nTHREAD EVENTS STORM TEST ENDED OK, IT WORKS!\n");
@@ -139,26 +136,28 @@ function checkEvent (what,i,ok,str,event,len) {
 
 
 
-function createEvents (events) {
-  
-  eventTypes.forEach(function (eventType,i,what,j) {
+function createListeners (events,thread,event) {
+  eventTypes.forEach(function (eventType,i) {
     i= t.length;
     while (i--) {
       t[i].on(eventType, processWrapListener(eventType, t[i].id));
     }
   });
+}
+
+
+
+
+
+
+function createRandomEvent (thread,eventType,what,i) {
   
-  eventTypes.forEach(function (eventType,i,what,j) {
-    i= rnd(16);
-    while (i--) {
-      thread= t[rnd(t.length)];
-      what= {thread:thread, argv:[eventType]};
-      j= rnd(8);
-      while (j--) what.argv.push(rndStr(rnd(8)));
-      events.push(what);
-      process.stdout.write("CREATED EVENT #"+ events.length+"\r");
-    }
-  });
+  thread= t[rnd(t.length)];
+  eventType= eventTypes[rnd(eventTypes.length)];
+  what= {thread:thread, argv:[eventType]};
+  i= rnd(8);
+  while (i--) what.argv.push(rndStr(rnd(8)));
+  return what;
   
 }
 
@@ -167,26 +166,33 @@ function createEvents (events) {
 
 
 
-function emitEvents (i,hownamy,what) {
+function emitEvents (i,howMany,what,n) {
 
-  //1/3 lo mandamos randomly de una tacada
+  //Hasta 2000 los mandamos randomly de una tacada
   
   i= 0;
-  howMany= notSent.length/2;
-  while (++i < howMany) {
-    what= notSent._rmv(rnd(notSent.length));
+  howMany= Math.floor(howManyEvents/2);
+  howMany= (howMany > 10e3) ? 10e3 : howMany;
+  while (i < howMany) {
+    what= createRandomEvent();
+    sentEvents.push(what);
     what.thread.emit.apply(what.thread, what.argv);
-    yesSent.push(what);
+    i+= 1;
   }
   
-  //Lo que queda se emite randomly en sucesivos nexticks
+  //Se emite randomly en sucesivos nexticks
   
-  (function loop (what) {
-    if (notSent.length) {
-      what= notSent._rmv(rnd(notSent.length));
-      what.thread.emit.apply(what.thread, what.argv);
-      yesSent.push(what);
-      setImmediate(loop);
+  howMany= howManyEvents- howMany;
+  (function loop (what,i) {
+    if (howMany > 0) {
+      i= (howMany > 2048) ? 1024+ rnd(1024) : howMany;
+      howMany-= i;
+      while (i--) {
+        what= createRandomEvent();
+        sentEvents.push(what);
+        what.thread.emit.apply(what.thread, what.argv);
+        setImmediate(loop);
+      }
     }
   })();
   
@@ -205,11 +211,13 @@ function threadBootCB (err,res,i,ctr,what) {
   
   if (++bootDONE !== t.length) return;
   
+  process.stdout.write("USING "+ howManyThreads+ " THREADS, ");
+  process.stdout.write(howManyEvents+ " EVENTS, ");
+  process.stdout.write(howManyEventTypes+ " EVENTTYPES\n");
+  
   console.log("THREAD BOOT CB: RUN");
   
-  createEvents(notSent);
-  total= notSent.length;
-  process.stdout.write("\n");
+  createListeners();
   
   //All setup ya solo falta emitir los events
   
@@ -223,10 +231,9 @@ function threadBootCB (err,res,i,ctr,what) {
 
 
 
-function createEventTypes (t,i,n,str) {
+function createEventTypes (t,i,str) {
   i= 0;
-  n= +process.argv[3] || 1024;
-  while (i < n) {
+  while (i < howManyEventTypes) {
     do {
       str= rndStr(rnd(8));
     } while(t._has(str));
@@ -242,7 +249,7 @@ function createEventTypes (t,i,n,str) {
 
 
 function createThreads (t,i,json,tagg) {
-  i= +process.argv[2] || 4;
+  i= howManyThreads;
   json= JSON.stringify(eventTypes);
   tagg= require("threads_a_gogo");
   while (i--) {
@@ -257,9 +264,11 @@ function createThreads (t,i,json,tagg) {
 
 t= [];
 total= 0;
-notSent= [];
-yesSent= [];
+sentEvents= [];
 eventTypes= [];
+howManyThreads= +process.argv[2] || 2;
+howManyEvents= +process.argv[3] || 100e3;
+howManyEventTypes= +process.argv[4] || 128;
 createEventTypes(eventTypes);
 createThreads(t);
 
