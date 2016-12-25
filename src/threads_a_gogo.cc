@@ -1052,7 +1052,7 @@ static inline void pushEmitEvent (eventsQueue* queue, const v8::Arguments &args)
     }
   }
   
-  TAGG_DEBUG && printf("PROCESS EMIT TO THREAD %ld #%ld\n", thread->id, event->serial);
+  TAGG_DEBUG && printf("PROCESS EMIT TO THREAD #%ld\n", event->serial);
   
   event->eventType= eventTypeEmit;
   qPush(event, queue);
