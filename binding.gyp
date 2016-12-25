@@ -13,11 +13,11 @@
 	{
         "target_name": "threads_a_gogo",
         "sources":     [ "src/threads_a_gogo.cc" ],
-        "cflags":      [ "-O2", "-pedantic" ],
-        "cflags_c":    [ "-O2", "-pedantic" ],
-        "cflags_cc":   [ "-O2", "-pedantic" ],
+        "cflags":      [ "-O3", "-pedantic" ],
+        "cflags_c":    [ "-O3", "-pedantic" ],
+        "cflags_cc":   [ "-O3", "-pedantic" ],
         # see https://gist.github.com/TooTallNate/1590684
-        "xcode_settings": { "OTHER_CFLAGS": [ "-O2", "-pedantic" ] },
+        "xcode_settings": { "OTHER_CFLAGS": [ "-O3", "-pedantic" ] },
         "dependencies" : [ "configure" ]
 	},
     {

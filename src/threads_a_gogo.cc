@@ -43,30 +43,30 @@ typedef enum eventTypes {
 } eventTypes;
 
 struct emitStruct {
-  volatile int argc;
+  int argc;
   char** argv;
-  char* volatile eventName;
+  char* eventName;
 };
 
 struct evalStruct {
-  volatile int error;
-  volatile int hasCallback;
+  int error;
+  int hasCallback;
   union {
-    char* volatile resultado;
-    char* volatile scriptText;
+    char* resultado;
+    char* scriptText;
   };
 };
 
 struct loadStruct {
-  volatile int error;
-  volatile int hasCallback;
-  char* volatile path;
+  int error;
+  int hasCallback;
+  char* path;
 };
 
 struct eventsQueueItem {
-  volatile int eventType;
-  eventsQueueItem* volatile next;
-  volatile unsigned long serial;
+  int eventType;
+  eventsQueueItem* next;
+  unsigned long serial;
   v8::Persistent<v8::Object> callback;
   union {
     emitStruct emit;
@@ -76,11 +76,11 @@ struct eventsQueueItem {
 };
 
 struct eventsQueue {
-  eventsQueueItem* volatile first;
-  eventsQueueItem* volatile pullPtr;
+  eventsQueueItem* first;
+  eventsQueueItem* pullPtr;
   union {
-    eventsQueueItem* volatile pushPtr;
-    eventsQueueItem* volatile last;
+    eventsQueueItem* pushPtr;
+    eventsQueueItem* last;
   };
 };
 
@@ -99,10 +99,10 @@ typedef struct typeThread {
   
   long int id;
   pthread_t thread;
-  volatile int IDLE;
-  volatile int ended;
-  volatile int sigkill;
-  volatile int destroyed;
+   int IDLE;
+   int ended;
+   int sigkill;
+   int destroyed;
   int hasDestroyCallback;
   int hasIdleEventsListener;
   unsigned long threadMagicCookie;
@@ -279,6 +279,7 @@ static inline eventsQueueItem* nuQitem (eventsQueue* queue) {
     qitem= (eventsQueueItem*) calloc(1, sizeof(eventsQueueItem));
     beep();
   }
+  qitem->serial= serial++;
   qitem->eventType= eventTypeNone;
   qitem->next= NULL;
   return qitem;
@@ -437,6 +438,12 @@ static void wakeUpThread (typeThread* thread, int sigkill) {
   //Hay que volver a soltar el lock
   pthread_mutex_unlock(&thread->idle_mutex);
   TAGG_DEBUG && printf("THREAD %ld wakeUpThread(sigkill=%d) #5 EXIT\n", thread->id, sigkill);
+/*
+  if (thread->sigkill == kKillRudely) {
+    thread->isolate->TerminateExecution();
+    printf("THREAD %ld wakeUpThread(sigkill=%d) TerminateExecution() #6 EXIT\n", thread->id, sigkill);
+  }
+*/
 }
 
 
@@ -532,19 +539,19 @@ static void eventLoop (typeThread* thread) {
   thread->isolate->Enter();
   v8::Persistent<v8::Context> context= v8::Context::New();
   context->Enter();
-  
+  {
   v8::HandleScope scope1;
   
   v8::Local<v8::Object> global= context->Global();
-  global->Set(v8::String::New("puts"), v8::FunctionTemplate::New(Puts)->GetFunction());
+  global->Set(v8::String::NewSymbol("puts"), v8::FunctionTemplate::New(Puts)->GetFunction());
   v8::Local<v8::Object> threadObject= v8::Object::New();
-  threadObject->Set(v8::String::New("id"), v8::Number::New(thread->id));
-  threadObject->Set(v8::String::New("version"),v8::String::New(k_TAGG_VERSION));
-  threadObject->Set(v8::String::New("emit"), v8::FunctionTemplate::New(threadEmit)->GetFunction());
+  threadObject->Set(v8::String::NewSymbol("id"), v8::Number::New(thread->id));
+  threadObject->Set(v8::String::NewSymbol("version"),v8::String::New(k_TAGG_VERSION));
+  threadObject->Set(v8::String::NewSymbol("emit"), v8::FunctionTemplate::New(threadEmit)->GetFunction());
   v8::Local<v8::Object> script= v8::Local<v8::Object>::New(v8::Script::Compile(v8::String::New(kBoot_js))->Run()->ToObject());
   v8::Local<v8::Object> r= script->CallAsFunction(threadObject, 0, NULL)->ToObject();
-  v8::Local<v8::Object> dnt= r->Get(v8::String::New("dnt"))->ToObject();
-  v8::Local<v8::Object> dev= r->Get(v8::String::New("dev"))->ToObject();
+  v8::Local<v8::Object> dnt= r->Get(v8::String::NewSymbol("dnt"))->ToObject();
+  v8::Local<v8::Object> dev= r->Get(v8::String::NewSymbol("dev"))->ToObject();
   
   //SetFatalErrorHandler(FatalErrorCB);
     
@@ -552,8 +559,8 @@ static void eventLoop (typeThread* thread) {
   
       double ntql;
       eventsQueueItem* qitem= NULL;
-      eventsQueueItem* volatile event;
-      eventsQueueItem* volatile qitem3;
+      eventsQueueItem* event;
+      eventsQueueItem* qitem3;
       v8::TryCatch onError;
         
       TAGG_DEBUG && printf("THREAD %ld BEFORE WHILE\n", thread->id);
@@ -737,7 +744,9 @@ static void eventLoop (typeThread* thread) {
       TAGG_DEBUG && printf("THREAD %ld SUELTA threadEventsQueue_mutex\n", thread->id);
       
     }
-
+  
+  }
+  context->Exit();
   context.Dispose();
   TAGG_DEBUG && printf("THREAD %ld EVENTLOOP EXIT\n", thread->id);
 }
@@ -838,7 +847,7 @@ static void Callback (
                            
   v8::HandleScope scope;
   
-  eventsQueueItem* volatile event;
+  eventsQueueItem* event;
   typeThread* thread= (typeThread*) watcher;
   
   v8::Local<v8::Array> array;
@@ -1040,7 +1049,7 @@ static v8::Handle<v8::Value> Load (const v8::Arguments &args) {
 //por que casi todo el código es idéntico en ambas
 static inline void pushEmitEvent (eventsQueue* queue, const v8::Arguments &args) {
 
-  eventsQueueItem* volatile event= nuQitem(queue);
+  eventsQueueItem* event= nuQitem(queue);
   event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
   if (event->emit.argc) {
@@ -1073,7 +1082,7 @@ static v8::Handle<v8::Value> processEmit (const v8::Arguments &args) {
     return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.emit(): 'this' must be a thread object")));
   }
 /*
-  eventsQueueItem* volatile event= nuQitem(thread->threadEventsQueue);
+  eventsQueueItem* event= nuQitem(thread->threadEventsQueue);
   event->serial= serial++;
   event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
@@ -1109,7 +1118,7 @@ static v8::Handle<v8::Value> threadEmit (const v8::Arguments &args) {
   assert(thread != NULL);
   assert(thread->threadMagicCookie == kThreadMagicCookie);
 /*
-  eventsQueueItem* volatile event= nuQitem(thread->processEventsQueue);
+  eventsQueueItem* event= nuQitem(thread->processEventsQueue);
   event->serial= serial++;
   event->emit.eventName= o2cstr(args[0]);
   event->emit.argc= (args.Length() > 1) ? (args.Length() - 1) : 0;
