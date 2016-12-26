@@ -50,7 +50,7 @@ To include the module in your project:
 
 **You need a node with a v8 >= 3.2.4 to run this module. Any node >= 0.5.1 comes with a v8 >= 3.2.4.**
 
-The module **runs fine, though, in any node >= 0.2.0** as long as you build it with a v8 >= 3.2.4. To do that you simply have to replace /node/deps/v8 with a newer version of v8 and recompile it (node). To get any version of node goto http://nodejs.org/dist/, and for v8 goto http://github.com/v8/v8, click on "branch", select the proper tag (>= 3.2.4), and download the .zip.
+The module **runs fine, though, in any node >= 0.2.0** as long as you build it with a v8 >= 3.2.4, [see here](https://nodejs.org/en/download/releases/). To do that you simply have to replace /node/deps/v8 with a newer version of v8 and recompile it (node). To get any version of node goto http://nodejs.org/dist/, and for v8 goto http://github.com/v8/v8, click on "branch", select the proper tag (>= 3.2.4), and download the .zip.
 
 ## Intro
 
