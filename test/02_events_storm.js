@@ -168,11 +168,11 @@ function createRandomEvent (thread,eventType,what,i) {
 
 function emitEvents (i,howMany,what,n) {
 
-  //Hasta 2000 los mandamos randomly de una tacada
+  //Hasta 20000 los mandamos randomly de una tacada
   
   i= 0;
   howMany= Math.floor(howManyEvents/2);
-  howMany= (howMany > 10e3) ? 10e3 : howMany;
+  howMany= (howMany > 20e3) ? 20e3 : howMany;
   while (i < howMany) {
     what= createRandomEvent();
     sentEvents.push(what);
@@ -185,14 +185,11 @@ function emitEvents (i,howMany,what,n) {
   howMany= howManyEvents- howMany;
   (function loop (what,i) {
     if (howMany > 0) {
-      i= (howMany > 2048) ? 1024+ rnd(1024) : howMany;
-      howMany-= i;
-      while (i--) {
-        what= createRandomEvent();
-        sentEvents.push(what);
-        what.thread.emit.apply(what.thread, what.argv);
-        setImmediate(loop);
-      }
+      howMany-= 1;
+      what= createRandomEvent();
+      sentEvents.push(what);
+      what.thread.emit.apply(what.thread, what.argv);
+      setImmediate(loop);
     }
   })();
   

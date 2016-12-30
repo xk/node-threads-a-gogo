@@ -17,7 +17,7 @@ function cb1 () {
 
 function cb2 () {
   var e= (process.hrtime(this.t1)[1]/1000).toFixed(2)+'(µs)         \r';
-  var str= " EVAL TO EMIT: "+ this.t0+ " EMIT TO CB: "+ e;
+  var str= " EVAL TO EMIT CB: "+ this.t0+ " EMIT CB TO EVAL CB: "+ e;
   process.stdout.write('THREAD '+ this.id+ str+ '\r');
   this.t0= process.hrtime();
   this.eval('thread.emit("ping")', cb2);

@@ -19,12 +19,15 @@ From source:
     cd node-threads-a-gogo
     # One of
     node-gyp rebuild
+    node test/all.js
     # or
     npm install
+    node test/all.js
     # or
-    node-waf configure build install
+    node-waf configure build install test
     # Depending of what wersion of node you've got.
-    # THREADS_A_GOGO CURRENTLY (v0.1.12) RUNS ON NODES v0.5.1 TO v0.10.48
+    #
+    # THREADS_A_GOGO CURRENTLY (v0.1.13) RUNS ON NODES v0.5.1 TO v6.9.2
 
 Basic functionality test:
 
@@ -42,7 +45,7 @@ Basic functionality test:
     27.OK.WAITING FOR DESTROY CB
     28.OK.29.DESTROY CB OK
     END
-    THREADS_A_GOGO v0.1.12 BASIC FUNCTIONALITY TEST: OK, IT WORKS!
+    THREADS_A_GOGO v0.1.13 BASIC FUNCTIONALITY TEST: OK, IT WORKS!
 
 To include the module in your project:
 
@@ -50,7 +53,7 @@ To include the module in your project:
 
 **You need a node with a v8 >= 3.2.4 to run this module. Any node >= 0.5.1 comes with a v8 >= 3.2.4.**
 
-The module **runs fine, though, in any node >= 0.2.0** as long as you build it with a v8 >= 3.2.4. To do that you simply have to replace /node/deps/v8 with a newer version of v8 and recompile it (node). To get any version of node goto http://nodejs.org/dist/, and for v8 goto http://github.com/v8/v8, click on "branch", select the proper tag (>= 3.2.4), and download the .zip.
+The module **runs fine, though, in any node >= 0.1.13** as long as you build it with a v8 >= 3.2.4, [see here](https://nodejs.org/en/download/releases/). To do that you simply have to replace /node/deps/v8 with a newer version of v8 and recompile it (node). To get any version of node goto http://nodejs.org/dist/, and for v8 goto http://github.com/v8/v8, click on "branch", select the proper tag (>= 3.2.4), and download the .zip.
 
 ## Intro
 
@@ -263,7 +266,7 @@ tagg= require('threads_a_gogo') -> tagg object
 
 { create: [Function],
   createPool: [Function: createPool],
-  version: '0.1.12' }
+  version: '0.1.13' }
   
 ```
 ### .create()
@@ -286,7 +289,7 @@ thread= tagg.create() -> thread object
   emit: [Function: emit],
   destroy: [Function: destroy],
   id: 0,
-  version: '0.1.12',
+  version: '0.1.13',
   on: [Function: on],
   once: [Function: once],
   _on: {},
@@ -348,7 +351,7 @@ Inside every thread .create()d by threads_a_gogo, there's a global `thread` obje
 thread (a global) ->
 
 { id: 0,
-  version: '0.1.12',
+  version: '0.1.13',
   on: [Function: on],
   once: [Function: once],
   emit: [Function: emit],
@@ -438,7 +441,7 @@ pool= tagg.createPool( numbreOfThreads ) ->
        emit: [Function: emit],
        destroy: [Function: destroy],
        id: 0,
-       version: '0.1.12',
+       version: '0.1.13',
        on: [Function: on],
        once: [Function: once],
        _on: {},
