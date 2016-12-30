@@ -1,20 +1,21 @@
-//2011-11 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
+//2011-11, 2016-12 Proyectos Equis Ka, s.l., jorge@jorgechamorro.com
 //threads_a_gogo.cc
 
+#include <node.h>
 #include <v8.h>
 #include <uv.h>
-#include <node.h>
-#include <node_version.h>
+#include <stdio.h>
 #include <unistd.h>
 #include <string.h>
-#include <stdio.h>
-#include <pthread.h>
 #include <stdlib.h>
-#include <string>
 #include <assert.h>
+#include <pthread.h>
+#include <node_version.h>
 
+/*
 //using namespace node;
 //using namespace v8;
+*/
 
 //Macros BEGIN
 
@@ -38,12 +39,17 @@
 
 #ifdef TAGG_USE_NEW_API
   #define TAGG_USE_ALLOCATOR
-  #if (NODE_MAJOR_VERSION < 2)
+  #if (NODE_MAJOR_VERSION < 3)
     #undef TAGG_USE_ALLOCATOR
   #endif
 #endif
 
-
+#ifdef TAGG_USE_ALLOCATOR
+  #define TAGG_USE_DEFAULT_ALLOCATOR
+  #if (NODE_MAJOR_VERSION < 7)
+    #undef TAGG_USE_DEFAULT_ALLOCATOR
+  #endif
+#endif
 
 //Macros END
 
@@ -143,7 +149,6 @@ static eventsQueue* nuQueue (void);
 static eventsQueue* destroyQueue (eventsQueue*);
 static inline typeThread* isAThread (v8::Handle<v8::Object>);
 static inline void wakeUpThread (typeThread*, int);
-static void Puts (const v8::FunctionCallbackInfo<v8::Value>&);
 static void* threadBootProc (void*);
 static inline char* o2cstr (v8::Handle<v8::Value>);
 static void eventLoop (typeThread*);
@@ -153,10 +158,16 @@ static void cleanUpAfterThread (typeThread*);
 static void Callback (
 #ifdef TAGG_USE_LIBUV
   uv_async_t*
+  #if defined(UV_VERSION_MAJOR) && (UV_VERSION_MAJOR == 0)
+  , int
+  #endif
 #else
-  EV_P_ ev_async*
+  EV_P_ ev_async*, int
 #endif
 );
+
+#ifdef TAGG_USE_NEW_API
+static void Puts (const v8::FunctionCallbackInfo<v8::Value>&);
 static void NOP (const v8::FunctionCallbackInfo<v8::Value>&);
 static void Destroy (const v8::FunctionCallbackInfo<v8::Value>&);
 static void Eval (const v8::FunctionCallbackInfo<v8::Value>&);
@@ -165,6 +176,18 @@ static inline void pushEmitEvent (eventsQueue*, const v8::FunctionCallbackInfo<v
 static void processEmit (const v8::FunctionCallbackInfo<v8::Value>&);
 static void threadEmit (const v8::FunctionCallbackInfo<v8::Value>&);
 static void Create (const v8::FunctionCallbackInfo<v8::Value>&);
+#else
+static v8::Handle<v8::Value> Puts (const v8::Arguments &);
+static v8::Handle<v8::Value> NOP (const v8::Arguments &);
+static v8::Handle<v8::Value> Destroy (const v8::Arguments &);
+static v8::Handle<v8::Value> Eval (const v8::Arguments &);
+static v8::Handle<v8::Value> Load (const v8::Arguments &);
+static inline void pushEmitEvent (eventsQueue*, const v8::Arguments &);
+static v8::Handle<v8::Value> processEmit (const v8::Arguments &);
+static v8::Handle<v8::Value> threadEmit (const v8::Arguments &);
+static v8::Handle<v8::Value> Create (const v8::Arguments &);
+#endif
+
 void Init (v8::Handle<v8::Object>);
 
 //Prototypes END
@@ -172,14 +195,14 @@ void Init (v8::Handle<v8::Object>);
 
 //Globals BEGIN
 
-const char* k_TAGG_VERSION= "0.2.0";
+const char* k_TAGG_VERSION= "0.1.13";
 
 static int TAGG_DEBUG= 0;
 static bool useLocker;
 static long int threadsCtr= 0;
 static eventsQueue* qitemsStore= NULL;
 static v8::Persistent<v8::Value> boot_js;
-static v8::Persistent<v8::Value> threadTemplate;
+static v8::Persistent<v8::ObjectTemplate> threadTemplate;
 static unsigned long serial= 0;
 
 #include "boot.js.c"
@@ -209,7 +232,7 @@ cat ../../../src/nextTick.js | ./minify kNextTick_js > ../../../src/kNextTick_js
 
 //jejeje
 static inline void beep (void) {
-  printf("\a"), fflush (stdout);  // que es lo mismo que \x07
+  printf("\x07"), fflush (stdout);  // que es lo mismo que \a
 }
 
 
@@ -317,10 +340,15 @@ static eventsQueue* destroyQueue (eventsQueue* queue) {
 
 //Llamar a un método de la thread con el 'this' (receiver) mal puesto es bombazo seguro, por eso esto.
 static typeThread* isAThread (v8::Handle<v8::Object> receiver) {
-  typeThread* thread;
+  typeThread* thread= NULL;
   if (receiver->IsObject()) {
+#ifdef TAGG_USE_NEW_API
     v8::Local<v8::Value> ptr= receiver->GetHiddenValue(v8::String::NewFromUtf8(v8::Isolate::GetCurrent(), "ptr"));
     thread= (typeThread*) ((uintptr_t) ptr->ToNumber()->Value());
+#else
+    if (receiver->InternalFieldCount() == 1)
+      thread= (typeThread*) receiver->GetPointerFromInternalField(0);
+#endif
     assert(thread != NULL);
     assert(thread->threadMagicCookie == kThreadMagicCookie);
     return thread;
@@ -372,26 +400,10 @@ static void wakeUpThread (typeThread* thread, int sigkill) {
 
 
 
+#if defined(TAGG_USE_ALLOCATOR)
+#if !defined(TAGG_USE_DEFAULT_ALLOCATOR)
 
-
-//printf de andar por casa
-static void Puts (const v8::FunctionCallbackInfo<v8::Value>& args) {
-  int i= 0;
-  while (i < args.Length()) {
-    v8::HandleScope scope(args.GetIsolate());
-    v8::String::Utf8Value c_str(args[i]);
-    fputs(*c_str, stdout);
-    i++;
-  }
-  fflush(stdout);
-  //args.GetReturnValue().Set(v8::Undefined(args.GetIsolate()));
-}
-
-
-
-
-
-#ifdef TAGG_USE_ALLOCATOR
+//See https://github.com/v8/v8/blob/1440cd3d833c7bca7777232b5fd754352010aa3e/samples/shell.cc#L66
 
 class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
  public:
@@ -403,6 +415,7 @@ class ArrayBufferAllocator : public v8::ArrayBuffer::Allocator {
   virtual void Free(void* data, size_t) { free(data); }
 };
 
+#endif
 #endif
 
 
@@ -424,6 +437,29 @@ static void* threadBootProc (void* arg) {
   
   assert(v8::Isolate::GetCurrent() == NULL);
   
+#ifdef TAGG_USE_ALLOCATOR
+
+  v8::Isolate::CreateParams create_params;
+  
+  #ifdef TAGG_USE_DEFAULT_ALLOCATOR
+    create_params.array_buffer_allocator = v8::ArrayBuffer::Allocator::NewDefaultAllocator();
+  #else
+    ArrayBufferAllocator wtf;
+    create_params.array_buffer_allocator= &wtf;
+  #endif
+  
+  thread->isolate= v8::Isolate::New(create_params);
+  
+#else
+  thread->isolate= v8::Isolate::New();
+#endif
+
+#ifdef TAGG_USE_NEW_API
+  thread->isolate->SetData(1, thread);
+#else
+  thread->isolate->SetData(thread);
+#endif
+
   if (useLocker) {
     v8::Locker wtf(thread->isolate);
     eventLoop(thread);
@@ -432,6 +468,8 @@ static void* threadBootProc (void* arg) {
     eventLoop(thread);
   
   assert(v8::Isolate::GetCurrent() == NULL);
+  
+  thread->isolate->Dispose();
   thread->ended= 1;
   WAKEUP_NODE_EVENT_LOOP
   
@@ -465,24 +503,41 @@ static inline char* o2cstr (v8::Handle<v8::Value> o) {
 // The thread's eventloop runs in the thread(s) not in node's main thread
 static void eventLoop (typeThread* thread) {
   TAGG_DEBUG && printf("THREAD %ld EVENTLOOP ENTER\n", thread->id);
-  
-  v8::Isolate* _i= thread->isolate;
-  v8::Isolate::Scope isolate_scope(_i);
-  v8::HandleScope scope1(_i);
-  v8::Local<v8::Context> context= v8::Context::New(_i);
+#ifdef TAGG_USE_NEW_API
+  v8::Isolate* iso= thread->isolate;
+  v8::Isolate::Scope isolate_scope(iso);
+  v8::HandleScope scope1(iso);
+  v8::Local<v8::Context> context= v8::Context::New(iso);
   v8::Context::Scope context_scope(context);
   
   v8::Local<v8::Object> global= context->Global();
-  global->Set(v8::String::NewFromUtf8(_i, "puts"), v8::FunctionTemplate::New(_i, Puts)->GetFunction());
-  v8::Local<v8::Object> threadObject= v8::Object::New(_i);
-  threadObject->Set(v8::String::NewFromUtf8(_i, "id"), v8::Number::New(_i, thread->id));
-  threadObject->Set(v8::String::NewFromUtf8(_i, "version"),v8::String::NewFromUtf8(_i, k_TAGG_VERSION));
-  threadObject->Set(v8::String::NewFromUtf8(_i, "emit"), v8::FunctionTemplate::New(_i, threadEmit)->GetFunction());
-  v8::Local<v8::Object> script= v8::Local<v8::Object>::New(_i, v8::Script::Compile(v8::String::NewFromUtf8(_i, kBoot_js))->Run()->ToObject());
+  global->Set(v8::String::NewFromUtf8(iso, "puts"), v8::FunctionTemplate::New(iso, Puts)->GetFunction());
+  v8::Local<v8::Object> threadObject= v8::Object::New(iso);
+  threadObject->Set(v8::String::NewFromUtf8(iso, "id"), v8::Number::New(iso, thread->id));
+  threadObject->Set(v8::String::NewFromUtf8(iso, "version"),v8::String::NewFromUtf8(iso, k_TAGG_VERSION));
+  threadObject->Set(v8::String::NewFromUtf8(iso, "emit"), v8::FunctionTemplate::New(iso, threadEmit)->GetFunction());
+  v8::Local<v8::Object> script= v8::Local<v8::Object>::New(iso, v8::Script::Compile(v8::String::NewFromUtf8(iso, kBoot_js))->Run()->ToObject());
   v8::Local<v8::Object> r= script->CallAsFunction(threadObject, 0, NULL)->ToObject();
-  v8::Local<v8::Object> dnt= r->Get(v8::String::NewFromUtf8(_i, "dnt"))->ToObject();
-  v8::Local<v8::Object> dev= r->Get(v8::String::NewFromUtf8(_i, "dev"))->ToObject();
-  
+  v8::Local<v8::Object> dnt= r->Get(v8::String::NewFromUtf8(iso, "dnt"))->ToObject();
+  v8::Local<v8::Object> dev= r->Get(v8::String::NewFromUtf8(iso, "dev"))->ToObject();
+#else
+  thread->isolate->Enter();
+  v8::Persistent<v8::Context> context= v8::Context::New();
+  context->Enter();
+  {
+  v8::HandleScope scope1;
+  v8::Local<v8::Object> global= context->Global();
+  global->Set(v8::String::NewSymbol("puts"), v8::FunctionTemplate::New(Puts)->GetFunction());
+  v8::Local<v8::Object> threadObject= v8::Object::New();
+  threadObject->Set(v8::String::NewSymbol("id"), v8::Number::New(thread->id));
+  threadObject->Set(v8::String::NewSymbol("version"),v8::String::New(k_TAGG_VERSION));
+  threadObject->Set(v8::String::NewSymbol("emit"), v8::FunctionTemplate::New(threadEmit)->GetFunction());
+  v8::Local<v8::Object> script= v8::Local<v8::Object>::New(v8::Script::Compile(v8::String::New(kBoot_js))->Run()->ToObject());
+  v8::Local<v8::Object> r= script->CallAsFunction(threadObject, 0, NULL)->ToObject();
+  v8::Local<v8::Object> dnt= r->Get(v8::String::NewSymbol("dnt"))->ToObject();
+  v8::Local<v8::Object> dev= r->Get(v8::String::NewSymbol("dev"))->ToObject();
+#endif
+
   //SetFatalErrorHandler(FatalErrorCB);
   
   double ntql;
@@ -499,7 +554,11 @@ static void eventLoop (typeThread* thread) {
       TAGG_DEBUG && printf("THREAD %ld QITEM #%ld\n", thread->id, event->serial);
       
       if (event->eventType == kEventTypeLoad) {
-        v8::HandleScope scope(_i);
+#ifdef TAGG_USE_NEW_API
+        v8::HandleScope scope(iso);
+#else
+        v8::HandleScope scope;
+#endif
         
         v8::Local<v8::Script> script;
         v8::Local<v8::Value> resultado;
@@ -521,7 +580,11 @@ static void eventLoop (typeThread* thread) {
         }
         
         if (buf != NULL) {
-          script= v8::Script::Compile(v8::String::NewFromUtf8(_i, buf));
+#ifdef TAGG_USE_NEW_API
+          script= v8::Script::Compile(v8::String::NewFromUtf8(iso, buf));
+#else
+          script= v8::Script::Compile(v8::String::New(buf));
+#endif
           free(buf);
           if (!onError.HasCaught()) resultado= script->Run();
           event->load.error= onError.HasCaught() ? 1 : 0;
@@ -548,21 +611,26 @@ static void eventLoop (typeThread* thread) {
         if (onError.HasCaught()) onError.Reset();
       }
       else if (event->eventType == kEventTypeEval) {
-        v8::HandleScope scope(_i);
+#ifdef TAGG_USE_NEW_API
+        v8::HandleScope scope(iso);
+#else
+        v8::HandleScope scope;
+#endif
         
         v8::Local<v8::Script> script;
         v8::Local<v8::Value> resultado;
         
         TAGG_DEBUG && printf("THREAD %ld QITEM EVAL\n", thread->id);
-        
-        script= v8::Script::Compile(v8::String::NewFromUtf8(_i, event->eval.scriptText));
+#ifdef TAGG_USE_NEW_API
+        script= v8::Script::Compile(v8::String::NewFromUtf8(iso, event->eval.scriptText));
+#else
+        script= v8::Script::Compile(v8::String::New(event->eval.scriptText));
+#endif
         free(event->eval.scriptText);
       
-        if (!onError.HasCaught())
-          resultado= script->Run();
-        event->eval.error= onError.HasCaught() ? 1 : 0;
-
+        if (!onError.HasCaught()) resultado= script->Run();
         if (event->eval.hasCallback) {
+          event->eval.error= onError.HasCaught() ? 1 : 0;
           if (!event->eval.error)
             event->eval.resultado= o2cstr(resultado);
           else
@@ -578,26 +646,45 @@ static void eventLoop (typeThread* thread) {
         if (onError.HasCaught()) onError.Reset();
       }
       else if (event->eventType == kEventTypeEmit) {
-        v8::HandleScope scope(_i);
-        
+#ifdef TAGG_USE_NEW_API
+        v8::HandleScope scope(iso);
+#else
+        v8::HandleScope scope;
+#endif
         v8::Local<v8::Array> array;
         v8::Local<v8::Value> args[2];
         
         TAGG_DEBUG && printf("THREAD %ld QITEM EVENT #%ld\n", thread->id, event->serial);
         
         assert(event->emit.eventName != NULL);
-        args[0]= v8::String::NewFromUtf8(_i, event->emit.eventName);
+        
+#ifdef TAGG_USE_NEW_API
+        args[0]= v8::String::NewFromUtf8(iso, event->emit.eventName);
         free(event->emit.eventName);
-        args[1]= array= v8::Array::New(_i, event->emit.argc);
+        args[1]= array= v8::Array::New(iso, event->emit.argc);
         if (event->emit.argc) {
           int i= 0;
           while (i < event->emit.argc) {
-            array->Set(i, v8::String::NewFromUtf8(_i, event->emit.argv[i]));
+            array->Set(i, v8::String::NewFromUtf8(iso, event->emit.argv[i]));
             free(event->emit.argv[i]);
             i++;
           }
           free(event->emit.argv);
         }
+#else
+        args[0]= v8::String::New(event->emit.eventName);
+        free(event->emit.eventName);
+        args[1]= array= v8::Array::New(event->emit.argc);
+        if (event->emit.argc) {
+          int i= 0;
+          while (i < event->emit.argc) {
+            array->Set(i, v8::String::New(event->emit.argv[i]));
+            free(event->emit.argv[i]);
+            i++;
+          }
+          free(event->emit.argv);
+        }
+#endif
         dev->CallAsFunction(global, 2, args);
         qPush(event, qitemsStore);
       }
@@ -658,6 +745,13 @@ static void eventLoop (typeThread* thread) {
     
   }
   
+#ifdef TAGG_USE_NEW_API
+#else
+  context->Exit();
+  context.Dispose();
+  }
+  thread->isolate->Exit();
+#endif
   TAGG_DEBUG && printf("THREAD %ld EVENTLOOP EXIT\n", thread->id);
 }
 
@@ -683,6 +777,8 @@ static void notifyIdle (typeThread* thread) {
 static void cleanUpAfterThreadUVCallback (uv_handle_t* arg) {
 
   typeThread* thread= (typeThread*) arg;
+  
+#ifdef TAGG_USE_NEW_API
   v8::HandleScope scope(v8::Isolate::GetCurrent());
   
   TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThreadUVCallback()\n", thread->id);
@@ -697,6 +793,20 @@ static void cleanUpAfterThreadUVCallback (uv_handle_t* arg) {
   
   thread->nodeDispatchEvents.Reset();
   thread->nodeObject.Reset();
+#else
+  v8::HandleScope scope;
+  
+  TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThreadCallback()\n", thread->id);
+  
+  if (thread->hasDestroyCallback) {
+    thread->destroyCallback->ToObject()->CallAsFunction(v8::Context::GetCurrent()->Global(), 0, NULL);
+    thread->destroyCallback.Dispose();
+  }
+  
+  thread->nodeDispatchEvents.Dispose();
+  thread->nodeObject.Dispose();
+#endif
+
   free(thread);
 }
 
@@ -711,7 +821,6 @@ static void cleanUpAfterThreadUVCallback (uv_handle_t* arg) {
 static void cleanUpAfterThread (typeThread* thread) {
   
   TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() IN MAIN THREAD #1\n", thread->id);
-  thread->isolate->Dispose();
   TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->threadEventsQueue)\n", thread->id);
   thread->threadEventsQueue= destroyQueue(thread->threadEventsQueue);
   TAGG_DEBUG && printf("THREAD %ld cleanUpAfterThread() destroyQueue(thread->processEventsQueue)\n", thread->id);
@@ -757,22 +866,27 @@ static void cleanUpAfterThread (typeThread* thread) {
 static void Callback (
 #ifdef TAGG_USE_LIBUV
   uv_async_t* watcher
+  #if defined(UV_VERSION_MAJOR) && (UV_VERSION_MAJOR == 0)
+  , int status
+  #endif
 #else
-  EV_P_ ev_async* watcher
+  EV_P_ ev_async* watcher, int status
 #endif
 ) {
   
-  v8::HandleScope scope(v8::Isolate::GetCurrent());
-  
   eventsQueueItem* event;
   typeThread* thread= (typeThread*) watcher;
-  v8::Isolate* _i= v8::Isolate::GetCurrent();
+  
+#ifdef TAGG_USE_NEW_API
+  v8::HandleScope scope(v8::Isolate::GetCurrent());
+  
+  v8::Isolate* iso= v8::Isolate::GetCurrent();
   
   v8::Local<v8::Value> cb;
   v8::Local<v8::Value> that;
   v8::Local<v8::Array> array;
   v8::Local<v8::Value> args[2];
-  v8::Local<v8::Value> null= v8::Local<v8::Value>::New(_i, v8::Null(_i));
+  v8::Local<v8::Value> null= v8::Local<v8::Value>::New(iso, v8::Null(iso));
   
   assert(thread != NULL);
   assert(!thread->destroyed);
@@ -792,17 +906,17 @@ static void Callback (
       assert(event->eval.resultado != NULL);
       
       if (event->eval.error) {
-        args[0]= v8::Exception::Error(v8::String::NewFromUtf8(_i, event->eval.resultado));
+        args[0]= v8::Exception::Error(v8::String::NewFromUtf8(iso, event->eval.resultado));
         args[1]= null;
       }
       else {
         args[0]= null;
-        args[1]= v8::String::NewFromUtf8(_i, event->eval.resultado);
+        args[1]= v8::String::NewFromUtf8(iso, event->eval.resultado);
       }
       free(event->eval.resultado);
       
-      cb= v8::Local<v8::Value>::New(_i, event->callback);
-      that= v8::Local<v8::Value>::New(_i, thread->nodeObject);
+      cb= v8::Local<v8::Value>::New(iso, event->callback);
+      that= v8::Local<v8::Value>::New(iso, thread->nodeObject);
       assert(that->IsObject());
       assert(cb->IsFunction());
       cb->ToObject()->CallAsFunction(that->ToObject(), 2, args);
@@ -819,21 +933,21 @@ static void Callback (
     
       TAGG_DEBUG && printf("CALLBACK kEventTypeEmit IN MAIN THREAD\n");
       
-      args[0]= v8::String::NewFromUtf8(_i, event->emit.eventName);
+      args[0]= v8::String::NewFromUtf8(iso, event->emit.eventName);
       free(event->emit.eventName);
-      array= v8::Array::New(_i, event->emit.argc);
+      array= v8::Array::New(iso, event->emit.argc);
       args[1]= array;
       if (event->emit.argc) {
         int i= 0;
         while (i < event->emit.argc) {
-          array->Set(i, v8::String::NewFromUtf8(_i, event->emit.argv[i]));
+          array->Set(i, v8::String::NewFromUtf8(iso, event->emit.argv[i]));
           free(event->emit.argv[i]);
           i++;
         }
         free(event->emit.argv);
       }
-      cb= v8::Local<v8::Value>::New(_i, thread->nodeDispatchEvents);
-      cb->ToObject()->CallAsFunction(_i->GetCurrentContext()->Global(), 2, args);
+      cb= v8::Local<v8::Value>::New(iso, thread->nodeDispatchEvents);
+      cb->ToObject()->CallAsFunction(iso->GetCurrentContext()->Global(), 2, args);
       
       event->eventType = kEventTypeEmpty;
       qPush(event, qitemsStore);
@@ -843,7 +957,80 @@ static void Callback (
     }
     
   }
+#else
+  v8::HandleScope scope;
   
+  v8::Local<v8::Array> array;
+  v8::Local<v8::Value> args[2];
+  v8::Local<v8::Value> null= v8::Local<v8::Value>::New(v8::Null());
+  
+  assert(thread != NULL);
+  assert(!thread->destroyed);
+  
+  TAGG_DEBUG && printf("UV CALLBACK FOR THREAD %ld BEGIN\n", thread->id);
+  
+  v8::TryCatch onError;
+  while ((event= qPull(thread->processEventsQueue))) {
+  
+    TAGG_DEBUG && printf("UV CALLBACK FOR THREAD %ld GOT EVENT #%ld\n", thread->id, event->serial);
+
+    if (event->eventType == kEventTypeEval) {
+    
+      TAGG_DEBUG && printf("CALLBACK eventTypeEval IN MAIN THREAD\n");
+      
+      assert(event->eval.hasCallback);
+      assert(event->eval.resultado != NULL);
+      
+      if (event->eval.error) {
+        args[0]= v8::Exception::Error(v8::String::New(event->eval.resultado));
+        args[1]= null;
+      }
+      else {
+        args[0]= null;
+        args[1]= v8::String::New(event->eval.resultado);
+      }
+      free(event->eval.resultado);
+      
+      assert(event->callback->IsFunction());
+      event->callback->ToObject()->CallAsFunction(thread->nodeObject->ToObject(), 2, args);
+      event->callback.Dispose();
+      event->eventType = kEventTypeEmpty;
+      qPush(event, qitemsStore);
+      
+      if (onError.HasCaught()) {
+        node::FatalException(onError);
+        return;
+      }
+    }
+    else if (event->eventType == kEventTypeEmit) {
+    
+      TAGG_DEBUG && printf("CALLBACK kEventTypeEmit IN MAIN THREAD\n");
+      
+      args[0]= v8::String::New(event->emit.eventName);
+      free(event->emit.eventName);
+      array= v8::Array::New(event->emit.argc);
+      args[1]= array;
+      if (event->emit.argc) {
+        int i= 0;
+        while (i < event->emit.argc) {
+          array->Set(i, v8::String::New(event->emit.argv[i]));
+          free(event->emit.argv[i]);
+          i++;
+        }
+        free(event->emit.argv);
+      }
+      thread->nodeDispatchEvents->ToObject()->CallAsFunction(v8::Context::GetCurrent()->Global(), 2, args);
+      
+      event->eventType = kEventTypeEmpty;
+      qPush(event, qitemsStore);
+    }
+    else {
+      assert(0);
+    }
+    
+  }
+#endif
+
   if (thread->sigkill && thread->ended) {
     TAGG_DEBUG && printf("UV CALLBACK FOR THREAD %ld CALLED cleanUpAfterThread()\n", thread->id);
     //pthread_cancel(thread->thread);
@@ -860,12 +1047,26 @@ static void Callback (
 
 
 
-
-// Calling a method of a destroyed thread throws an error.
-static void NOP (const v8::FunctionCallbackInfo<v8::Value>& args) {
-  v8::Isolate* i= args.GetIsolate();
-  v8::HandleScope scope(i);
-  i->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(i, "This thread has been destroyed.")));
+//printf de andar por casa
+#ifdef TAGG_USE_NEW_API
+static void Puts (const v8::FunctionCallbackInfo<v8::Value>& args) {
+  v8::HandleScope scope(args.GetIsolate());
+#else
+static v8::Handle<v8::Value> Puts (const v8::Arguments &args) {
+  v8::HandleScope scope;
+#endif
+  int i= 0;
+  while (i < args.Length()) {
+    v8::String::Utf8Value c_str(args[i]);
+    fputs(*c_str, stdout);
+    i++;
+  }
+  fflush(stdout);
+#ifdef TAGG_USE_NEW_API
+  //args.GetReturnValue().Set(v8::Undefined(args.GetIsolate()));
+#else
+  return v8::Undefined();
+#endif
 }
 
 
@@ -875,8 +1076,35 @@ static void NOP (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 
 
+// Calling a method of a destroyed thread throws an error.
+#ifdef TAGG_USE_NEW_API
+static void NOP (const v8::FunctionCallbackInfo<v8::Value>& args) {
+  v8::Isolate* iso= args.GetIsolate();
+  v8::HandleScope scope(iso);
+  iso->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(iso, "This thread has been destroyed.")));
+}
+#else
+static v8::Handle<v8::Value> NOP (const v8::Arguments &args) {
+  v8::HandleScope scope;
+  return v8::ThrowException(v8::Exception::TypeError(v8::String::New("This thread has been destroyed")));
+}
+#endif
+
+
+
+
+
+
+
 // Tell a thread to quit, either nicely or rudely.
+#ifdef TAGG_USE_NEW_API
 static void Destroy (const v8::FunctionCallbackInfo<v8::Value>& args) {
+  v8::Isolate* iso= args.GetIsolate();
+  v8::HandleScope scope(iso);
+#else
+static v8::Handle<v8::Value> Destroy (const v8::Arguments &args) {
+  v8::HandleScope scope;
+#endif
 
   //thread.destroy() or thread.destroy(0) means nicely (the default)
   //thread destroy(1) means rudely.
@@ -885,16 +1113,18 @@ static void Destroy (const v8::FunctionCallbackInfo<v8::Value>& args) {
   //When done rudely it will try to exit the event loop regardless.
   //ToDo: If the thread is stuck in a ` while (1) ; ` or something this won't work...
   
-  v8::Isolate* i= args.GetIsolate();
-  v8::HandleScope scope(i);
   //TODO: Hay que comprobar que this en un objeto y que tiene hiddenRefTotypeThread_symbol y que no es nil
   //TODO: Aquí habría que usar static void TerminateExecution(int thread_id);
   //TODO: static void v8::V8::TerminateExecution  ( Isolate *   isolate= NULL   )
   
   typeThread* thread= isAThread(args.This());
   if (!thread) {
-    args.GetReturnValue().Set(i->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(i, "thread.destroy(): the receiver must be a thread object"))));
+#ifdef TAGG_USE_NEW_API
+    args.GetReturnValue().Set(iso->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(iso, "thread.destroy(): the receiver must be a thread object"))));
     return;
+#else
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.destroy(): the receiver must be a thread object")));
+#endif
   }
   
   int nuSigkill= kKillNicely;
@@ -904,7 +1134,11 @@ static void Destroy (const v8::FunctionCallbackInfo<v8::Value>& args) {
   
   thread->hasDestroyCallback= (args.Length() > 1) && (args[1]->IsFunction());
   if (thread->hasDestroyCallback) {
-    thread->destroyCallback.Reset(i, args[1]);
+#ifdef TAGG_USE_NEW_API
+    thread->destroyCallback.Reset(iso, args[1]);
+#else
+    thread->destroyCallback= v8::Persistent<v8::Object>::New(args[1]->ToObject());
+#endif
   }
   
   if (TAGG_DEBUG) {
@@ -914,12 +1148,20 @@ static void Destroy (const v8::FunctionCallbackInfo<v8::Value>& args) {
   
   wakeUpThread(thread, nuSigkill);
   
+#ifdef TAGG_USE_NEW_API
   v8::Local<v8::Object> nodeObject;
-  nodeObject= v8::Local<v8::Value>::New(i, thread->nodeObject)->ToObject();
-  nodeObject->Set(v8::String::NewFromUtf8(i, "load"), v8::FunctionTemplate::New(i, NOP)->GetFunction());
-  nodeObject->Set(v8::String::NewFromUtf8(i, "eval"), v8::FunctionTemplate::New(i, NOP)->GetFunction());
-  nodeObject->Set(v8::String::NewFromUtf8(i, "emit"), v8::FunctionTemplate::New(i, NOP)->GetFunction());
-  nodeObject->Set(v8::String::NewFromUtf8(i, "destroy"), v8::FunctionTemplate::New(i, NOP)->GetFunction());
+  nodeObject= v8::Local<v8::Value>::New(iso, thread->nodeObject)->ToObject();
+  nodeObject->Set(v8::String::NewFromUtf8(iso, "load"), v8::FunctionTemplate::New(iso, NOP)->GetFunction());
+  nodeObject->Set(v8::String::NewFromUtf8(iso, "eval"), v8::FunctionTemplate::New(iso, NOP)->GetFunction());
+  nodeObject->Set(v8::String::NewFromUtf8(iso, "emit"), v8::FunctionTemplate::New(iso, NOP)->GetFunction());
+  nodeObject->Set(v8::String::NewFromUtf8(iso, "destroy"), v8::FunctionTemplate::New(iso, NOP)->GetFunction());
+#else
+  thread->nodeObject->ToObject()->Set(v8::String::NewSymbol("load"), v8::FunctionTemplate::New(NOP)->GetFunction());
+  thread->nodeObject->ToObject()->Set(v8::String::NewSymbol("eval"), v8::FunctionTemplate::New(NOP)->GetFunction());
+  thread->nodeObject->ToObject()->Set(v8::String::NewSymbol("emit"), v8::FunctionTemplate::New(NOP)->GetFunction());
+  thread->nodeObject->ToObject()->Set(v8::String::NewSymbol("destroy"), v8::FunctionTemplate::New(NOP)->GetFunction());
+  return v8::Undefined();
+#endif
 }
 
 
@@ -930,30 +1172,51 @@ static void Destroy (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 
 // Eval: Pushes an eval job to the threadEventsQueue.
+#ifdef TAGG_USE_NEW_API
 static void Eval (const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::HandleScope scope(args.GetIsolate());
-  
+#else
+static v8::Handle<v8::Value> Eval (const v8::Arguments &args) {
+  v8::HandleScope scope;
+#endif
+
   if (!args.Length()) {
+#ifdef TAGG_USE_NEW_API
     args.GetReturnValue().Set(args.GetIsolate()->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(args.GetIsolate(), "thread.eval(program [,callback]): missing arguments"))));
     return;
+#else
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.eval(program [,callback]): missing arguments")));
+#endif
   }
   
   typeThread* thread= isAThread(args.This());
   if (!thread) {
+#ifdef TAGG_USE_NEW_API
     args.GetReturnValue().Set(args.GetIsolate()->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(args.GetIsolate(), "thread.eval(): the receiver must be a thread object"))));
     return;
+#else
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.eval(): the receiver must be a thread object")));
+#endif
   }
 
   eventsQueueItem* event= nuQitem();
   event->eval.hasCallback= (args.Length() > 1) && (args[1]->IsFunction());
   if (event->eval.hasCallback) {
+#ifdef TAGG_USE_NEW_API
     event->callback.Reset(args.GetIsolate(), args[1]);
+#else
+    event->callback= v8::Persistent<v8::Object>::New(args[1]->ToObject());
+#endif
   }
   event->eval.scriptText= o2cstr(args[0]);
   event->eventType= kEventTypeEval;
   qPush(event, thread->threadEventsQueue);
   wakeUpThread(thread, thread->sigkill);
+#ifdef TAGG_USE_NEW_API
   args.GetReturnValue().Set(args.This());
+#else
+  return args.This();
+#endif
 }
 
 
@@ -964,31 +1227,59 @@ static void Eval (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 
 // Load: emits a kEventTypeLoad event to the thread
+#ifdef TAGG_USE_NEW_API
 static void Load (const v8::FunctionCallbackInfo<v8::Value>& args) {
   v8::HandleScope scope(args.GetIsolate());
+#else
+static v8::Handle<v8::Value> Load (const v8::Arguments &args) {
+  v8::HandleScope scope;
+#endif
 
   if (!args.Length()) {
+  
+#ifdef TAGG_USE_NEW_API
     args.GetReturnValue().Set(args.GetIsolate()->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(args.GetIsolate(), "thread.load(filename [,callback]): missing arguments"))));
     return;
+#else
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.load(filename [,callback]): missing arguments")));
+#endif
+
   }
 
   typeThread* thread= isAThread(args.This());
   if (!thread) {
+  
+#ifdef TAGG_USE_NEW_API
     args.GetReturnValue().Set(args.GetIsolate()->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(args.GetIsolate(), "thread.load(): the receiver must be a thread object"))));
     return;
+#else
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.load(): the receiver must be a thread object")));
+#endif
+
   }
   
   eventsQueueItem* event= nuQitem();
   event->load.path= o2cstr(args[0]);
   event->load.hasCallback= ((args.Length() > 1) && (args[1]->IsFunction()));
   if (event->load.hasCallback) {
+  
+#ifdef TAGG_USE_NEW_API
     event->callback.Reset(args.GetIsolate(), args[1]);
+#else
+    event->callback= v8::Persistent<v8::Object>::New(args[1]->ToObject());
+#endif
+
   }
   
   event->eventType= kEventTypeLoad;
   qPush(event, thread->threadEventsQueue);
   wakeUpThread(thread, thread->sigkill);
+  
+#ifdef TAGG_USE_NEW_API
   args.GetReturnValue().Set(args.This());
+#else
+  return args.This();
+#endif
 }
 
 
@@ -999,7 +1290,11 @@ static void Load (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 
 //por que casi todo el código es idéntico en processEmit y threadEmit
+#ifdef TAGG_USE_NEW_API
 static inline void pushEmitEvent (eventsQueue* queue, const v8::FunctionCallbackInfo<v8::Value>& args) {
+#else
+static inline void pushEmitEvent (eventsQueue* queue, const v8::Arguments &args) {
+#endif
 
   eventsQueueItem* event= nuQitem();
   event->emit.eventName= o2cstr(args[0]);
@@ -1027,21 +1322,31 @@ static inline void pushEmitEvent (eventsQueue* queue, const v8::FunctionCallback
 
 
 //La que emite los events de node hacia las threads
+#ifdef TAGG_USE_NEW_API
 static void processEmit (const v8::FunctionCallbackInfo<v8::Value>& args) {
-
-  if (!args.Length())
-    return args.GetReturnValue().Set(args.This());
-    
+  if (!args.Length()) return args.GetReturnValue().Set(args.This());
   typeThread* thread= isAThread(args.This());
   if (!thread) {
     args.GetReturnValue().Set(args.GetIsolate()->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(args.GetIsolate(), "thread.emit(): 'this' must be a thread object"))));
     return;
   }
-  
+#else
+static v8::Handle<v8::Value> processEmit (const v8::Arguments &args) {
+  if (!args.Length()) return args.This();
+  typeThread* thread= isAThread(args.This());
+  if (!thread) {
+    return v8::ThrowException(v8::Exception::TypeError(v8::String::New("thread.emit(): 'this' must be a thread object")));
+  }
+#endif
+
   pushEmitEvent(thread->threadEventsQueue, args);
   wakeUpThread(thread, thread->sigkill);
-  args.GetReturnValue().Set(args.This());
   
+#ifdef TAGG_USE_NEW_API
+  args.GetReturnValue().Set(args.This());
+#else
+  return args.This();
+#endif
 }
 
 
@@ -1051,18 +1356,25 @@ static void processEmit (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 
 //La que emite los events de las threads hacia node, se ejecuta en las threads.
+#ifdef TAGG_USE_NEW_API
 static void threadEmit (const v8::FunctionCallbackInfo<v8::Value>& args) {
-
-  if (!args.Length())
-    return args.GetReturnValue().Set(args.This());
-    
+  if (!args.Length()) return args.GetReturnValue().Set(args.This());
   typeThread* thread= (typeThread*) args.GetIsolate()->GetData(1);
+#else
+static v8::Handle<v8::Value> threadEmit (const v8::Arguments &args) {
+  if (!args.Length()) return args.This();
+  typeThread* thread= (typeThread*) v8::Isolate::GetCurrent()->GetData();
+#endif
+
   assert(thread != NULL);
   assert(thread->threadMagicCookie == kThreadMagicCookie);
   pushEmitEvent(thread->processEventsQueue, args);
   WAKEUP_NODE_EVENT_LOOP
+#ifdef TAGG_USE_NEW_API
   args.GetReturnValue().Set(args.This());
-  
+#else
+  return args.This();
+#endif
 }
 
 
@@ -1073,25 +1385,21 @@ static void threadEmit (const v8::FunctionCallbackInfo<v8::Value>& args) {
 
 
 //Se ejecuta al hacer tagg.create(): Creates and launches a new isolate in a new background thread.
+#ifdef TAGG_USE_NEW_API
 static void Create (const v8::FunctionCallbackInfo<v8::Value>& args) {
     v8::HandleScope scope(args.GetIsolate());
+    v8::Isolate* iso= args.GetIsolate();
+#else
+static v8::Handle<v8::Value> Create (const v8::Arguments &args) {
+    v8::HandleScope scope;
+#endif
     
-    v8::Isolate* i= args.GetIsolate();
     typeThread* thread= (typeThread*) calloc(1, sizeof (typeThread));
     thread->id= threadsCtr++;
     thread->threadMagicCookie= kThreadMagicCookie;
     thread->threadEventsQueue= nuQueue();
     thread->processEventsQueue= nuQueue();
-#ifdef TAGG_USE_ALLOCATOR
-    ArrayBufferAllocator wtf;
-    v8::Isolate::CreateParams create_params;
-    create_params.array_buffer_allocator= &wtf;
-    thread->isolate= v8::Isolate::New(create_params);
-#else
-    thread->isolate= v8::Isolate::New();
-#endif
-    thread->isolate->SetData(1, thread);
-    
+
     pthread_cond_init(&(thread->idle_cv), NULL);
     pthread_mutex_init(&(thread->idle_mutex), NULL);
     
@@ -1104,23 +1412,34 @@ static void Create (const v8::FunctionCallbackInfo<v8::Value>& args) {
       //Algo ha ido mal, toca deshacer todo
       TAGG_DEBUG && printf("CALLED cleanUpAfterThread %ld FROM CREATE()\n", thread->id);
       cleanUpAfterThread(thread);
-      args.GetReturnValue().Set(i->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(i, "create(): error in pthread_create()"))));
+#ifdef TAGG_USE_NEW_API
+      args.GetReturnValue().Set(iso->ThrowException(v8::Exception::TypeError(v8::String::NewFromUtf8(iso, "create(): error in pthread_create()"))));
       return;
+#else
+      return v8::ThrowException(v8::Exception::TypeError(v8::String::New("create(): error in pthread_create()")));
+#endif
     }
-    
-    v8::Local<v8::Object> nodeObject= v8::Object::New(i);
-    nodeObject->SetHiddenValue(v8::String::NewFromUtf8(i, "ptr"), v8::Number::New(i, (double) ((uintptr_t) thread)));
-    nodeObject->Set(v8::String::NewFromUtf8(i, "load"), v8::FunctionTemplate::New(i, Load)->GetFunction());
-    nodeObject->Set(v8::String::NewFromUtf8(i, "eval"), v8::FunctionTemplate::New(i, Eval)->GetFunction());
-    nodeObject->Set(v8::String::NewFromUtf8(i, "emit"), v8::FunctionTemplate::New(i, processEmit)->GetFunction());
-    nodeObject->Set(v8::String::NewFromUtf8(i, "destroy"), v8::FunctionTemplate::New(i, Destroy)->GetFunction());
-    nodeObject->Set(v8::String::NewFromUtf8(i, "id"), v8::Integer::New(i, thread->id));
-    nodeObject->Set(v8::String::NewFromUtf8(i, "version"), v8::String::NewFromUtf8(i, k_TAGG_VERSION));
-    v8::Local<v8::Value> boot= v8::Local<v8::Value>::New(i, boot_js);
-    //nodeObject->SetHiddenValue(v8::String::NewFromUtf8(i, "dispatchEvents"), boot->ToObject()->CallAsFunction(nodeObject, 0, NULL)->ToObject());
-    thread->nodeDispatchEvents.Reset(i, boot->ToObject()->CallAsFunction(nodeObject, 0, NULL)->ToObject());
-    thread->nodeObject.Reset(i, nodeObject);
-    
+
+#ifdef TAGG_USE_NEW_API
+    v8::Local<v8::Object> nodeObject= v8::Object::New(iso);
+    nodeObject->SetHiddenValue(v8::String::NewFromUtf8(iso, "ptr"), v8::Number::New(iso, (double) ((uintptr_t) thread)));
+    nodeObject->Set(v8::String::NewFromUtf8(iso, "load"), v8::FunctionTemplate::New(iso, Load)->GetFunction());
+    nodeObject->Set(v8::String::NewFromUtf8(iso, "eval"), v8::FunctionTemplate::New(iso, Eval)->GetFunction());
+    nodeObject->Set(v8::String::NewFromUtf8(iso, "emit"), v8::FunctionTemplate::New(iso, processEmit)->GetFunction());
+    nodeObject->Set(v8::String::NewFromUtf8(iso, "destroy"), v8::FunctionTemplate::New(iso, Destroy)->GetFunction());
+    nodeObject->Set(v8::String::NewFromUtf8(iso, "id"), v8::Integer::New(iso, thread->id));
+    nodeObject->Set(v8::String::NewFromUtf8(iso, "version"), v8::String::NewFromUtf8(iso, k_TAGG_VERSION));
+    v8::Local<v8::Value> boot= v8::Local<v8::Value>::New(iso, boot_js);
+    thread->nodeDispatchEvents.Reset(iso, boot->ToObject()->CallAsFunction(nodeObject, 0, NULL)->ToObject());
+    thread->nodeObject.Reset(iso, nodeObject);
+#else
+    thread->nodeObject= v8::Persistent<v8::Object>::New(threadTemplate->NewInstance());
+    thread->nodeObject->ToObject()->SetPointerInInternalField(0, thread);
+    thread->nodeObject->ToObject()->Set(v8::String::NewSymbol("id"), v8::Integer::New(thread->id));
+    thread->nodeObject->ToObject()->Set(v8::String::NewSymbol("version"), v8::String::New(k_TAGG_VERSION));
+    thread->nodeDispatchEvents= v8::Persistent<v8::Object>::New(boot_js->ToObject()->CallAsFunction(thread->nodeObject->ToObject(), 0, NULL)->ToObject());
+#endif
+
 #ifdef TAGG_USE_LIBUV
       uv_async_init(uv_default_loop(), &thread->async_watcher, Callback);
 #else
@@ -1129,7 +1448,11 @@ static void Create (const v8::FunctionCallbackInfo<v8::Value>& args) {
       ev_ref(EV_DEFAULT_UC);
 #endif
 
+#ifdef TAGG_USE_NEW_API
     args.GetReturnValue().Set(nodeObject);
+#else
+    return thread->nodeObject;
+#endif
 }
 
 
@@ -1142,12 +1465,32 @@ static void Create (const v8::FunctionCallbackInfo<v8::Value>& args) {
 void Init (v8::Handle<v8::Object> target) {
   qitemsStore= nuQueue();
   useLocker= v8::Locker::IsActive();
-  v8::Isolate* i= v8::Isolate::GetCurrent();
-  boot_js.Reset(i, v8::Script::Compile(v8::String::NewFromUtf8(i, kBoot_js))->Run()->ToObject());
   
-  target->Set(v8::String::NewFromUtf8(i, "create"), v8::FunctionTemplate::New(i, Create)->GetFunction());
-  target->Set(v8::String::NewFromUtf8(i, "createPool"), v8::Script::Compile(v8::String::NewFromUtf8(i, kPool_js))->Run()->ToObject());
-  target->Set(v8::String::NewFromUtf8(i, "version"), v8::String::NewFromUtf8(i, k_TAGG_VERSION));
+#ifdef TAGG_USE_NEW_API
+
+  v8::Isolate* iso= v8::Isolate::GetCurrent();
+  boot_js.Reset(iso, v8::Script::Compile(v8::String::NewFromUtf8(iso, kBoot_js))->Run()->ToObject());
+  target->Set(v8::String::NewFromUtf8(iso, "create"), v8::FunctionTemplate::New(iso, Create)->GetFunction());
+  target->Set(v8::String::NewFromUtf8(iso, "createPool"), v8::Script::Compile(v8::String::NewFromUtf8(iso, kPool_js))->Run()->ToObject());
+  target->Set(v8::String::NewFromUtf8(iso, "version"), v8::String::NewFromUtf8(iso, k_TAGG_VERSION));
+  
+#else
+
+  boot_js= v8::Persistent<v8::Object>::New(v8::Script::Compile(v8::String::New(kBoot_js))->Run()->ToObject());
+  
+  threadTemplate= v8::Persistent<v8::ObjectTemplate>::New(v8::ObjectTemplate::New());
+  threadTemplate->SetInternalFieldCount(1);
+  threadTemplate->Set(v8::String::NewSymbol("load"), v8::FunctionTemplate::New(Load));
+  threadTemplate->Set(v8::String::NewSymbol("eval"), v8::FunctionTemplate::New(Eval));
+  threadTemplate->Set(v8::String::NewSymbol("emit"), v8::FunctionTemplate::New(processEmit));
+  threadTemplate->Set(v8::String::NewSymbol("destroy"), v8::FunctionTemplate::New(Destroy));
+  
+  target->Set(v8::String::NewSymbol("create"), v8::FunctionTemplate::New(Create)->GetFunction());
+  target->Set(v8::String::NewSymbol("createPool"), v8::Script::Compile(v8::String::New(kPool_js))->Run()->ToObject());
+  target->Set(v8::String::NewSymbol("version"), v8::String::New(k_TAGG_VERSION));
+  
+#endif
+  
 }
 
 NODE_MODULE(threads_a_gogo, Init)

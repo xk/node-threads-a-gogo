@@ -1,6 +1,6 @@
 {
   "name": "threads_a_gogo",
-  "version": "0.2.0",
+  "version": "0.1.13",
   "main": "build/Release/threads_a_gogo.node",
   "description": "██ Simple and fast JavaScript threads for Node.js ██",
   "keywords": [
@@ -31,7 +31,7 @@
   },
   "os": ["macos", "linux", "darwin"],
   "engines": {
-    "node": ">=0.5.1 <0.11"
+    "node": ">=0.5.1 <=6.9.2"
   },
   "devDependencies": { "test": ">=0.1.8" }
 }
