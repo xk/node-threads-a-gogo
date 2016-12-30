@@ -1,4 +1,4 @@
-[![build status](https://travis-ci.org/xk/node-threads-a-gogo.svg?branch=0.1.12)](https://travis-ci.org/xk/node-threads-a-gogo)
+[![build status](https://travis-ci.org/xk/node-threads-a-gogo.svg?branch=master)](https://travis-ci.org/xk/node-threads-a-gogo)
 [![npm version](https://badge.fury.io/js/threads_a_gogo.svg)](https://www.npmjs.com/package/threads_a_gogo)
 
 ***
