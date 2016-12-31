@@ -197,11 +197,11 @@ const char* k_TAGG_VERSION= "0.1.13";
 
 static int TAGG_DEBUG= 0;
 static bool useLocker;
-static long int threadsCtr= 0;
+static unsigned long serial= 0;
+static unsigned int threadsCtr= 0;
 static eventsQueue* qitemsStore= NULL;
 static v8::Persistent<v8::Value> boot_js;
 static v8::Persistent<v8::ObjectTemplate> threadTemplate;
-static unsigned long serial= 0;
 
 #include "boot.js.c"
 #include "pool.js.c"
