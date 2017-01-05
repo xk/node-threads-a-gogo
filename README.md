@@ -27,13 +27,14 @@ From source:
     node-waf configure build install test
     # Depending of what wersion of node you've got.
     #
-    # THREADS_A_GOGO CURRENTLY (v0.1.13) RUNS ON NODES v0.5.1 TO v6.9.2
+    # THREADS_A_GOGO CURRENTLY (v0.1.13 / 2017)
+    # RUNS ON NODES v0.5.1 TO v6.9.2
 
 Basic functionality test:
 
     cd node-threads-a-gogo
     node test/all.js
-    # If all goes well should ouput something like this:
+    # If all goes well should output something like this:
     0.OK.1.OK.2.OK.3.TAGG OBJECT OK
     4.OK.5.OK.6.OK.7.OK.8.OK.9.OK.10.OK.11.OK.12.THREAD OBJECT OK
     13.OK.WAITING FOR LOAD CB
@@ -53,7 +54,7 @@ To include the module in your project:
 
 **You need a node with a v8 >= 3.2.4 to run this module. Any node >= 0.5.1 comes with a v8 >= 3.2.4.**
 
-The module **runs fine, though, in any node >= 0.1.13** as long as you build it with a v8 >= 3.2.4, [see here](https://nodejs.org/en/download/releases/). To do that you simply have to replace /node/deps/v8 with a newer version of v8 and recompile it (node). To get any version of node goto http://nodejs.org/dist/, and for v8 goto http://github.com/v8/v8, click on "branch", select the proper tag (>= 3.2.4), and download the .zip.
+The module **runs fine, though, in any node >= 0.1.13** as long as you build it with a v8 >= 3.2.4, [see here](https://nodejs.org/en/download/releases/). To do that you simply have to replace /node/deps/v8 with a newer version of v8 and recompile it (recompile node). To get any version of node goto http://nodejs.org/dist/, and for v8 goto http://github.com/v8/v8, click on "branch", select the proper tag (>= 3.2.4), and download the .zip.
 
 ## Intro
 
@@ -337,7 +338,7 @@ Emit an event of `eventType` with `eventData` in the thread `thread`. All its ar
 ### .destroy( [ rudely ] )
 `thread.destroy( [0 (nicely) | 1 (rudely)] [, cb])` -> undefined
 
-Destroys the thread. If the first parameter is not provided or falsy or 0 (the default) the thread will keep running until both its nextTick/setImmediate queue and its pending `.eval()` jobs queue are empty. If it's truthy or 1 (rudely) the thread's event loop will exit as soon as possible, regardless. If a callback cb (optional) is provided, it will be called when the thread has been killed and completely destroyed, the cb will receive no arguments and the receiver (its 'this') points to the global object. If the thread is stuck in a while (1) ; or similar it won't end and currently tagg has no way around that. At least not yet. Pull requests are very much welcomed, just so you know.
+Destroys the thread. If the first parameter is not provided or falsy or 0 (the default) the thread will keep running until both its nextTick/setImmediate queue and its pending `.eval()` jobs queue are empty. If it's truthy or 1 (rudely) the thread's event loop will exit as soon as possible, regardless. If a callback cb (optional) is provided, it will be called when the thread has been killed and completely destroyed, the cb will receive no arguments and the receiver (its 'this') points to the global object. If the thread is stuck in a while (1) ; or similar it won't end and currently tagg has no way around that.
 
 ### _on
 Ignore, don't touch that. The `_on` object holds the event listeners.
